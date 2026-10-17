@@ -20,21 +20,31 @@ WM_DESTROY = 0x0002
 WM_SETTINGCHANGE = 0x001A
 WM_INPUTLANGCHANGEREQUEST = 0x0050
 WM_SETICON = 0x0080
+WM_INPUT = 0x00FF
 WM_TIMER = 0x0113
 WM_HOTKEY = 0x0312
 WM_LBUTTONDBLCLK = 0x0203
 WM_RBUTTONUP = 0x0205
 WM_APP = 0x8000
+PM_REMOVE = 0x0001
 
 # Трей
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 0x01, 0x02, 0x04, 0x10
 NIIF_INFO, NIIF_WARNING = 0x01, 0x02
+NIIF_USER, NIIF_NOSOUND, NIIF_LARGE_ICON, NIIF_RESPECT_QUIET_TIME = 0x04, 0x10, 0x20, 0x80
 
 # Меню
 MF_STRING, MF_GRAYED, MF_CHECKED, MF_SEPARATOR = 0x0000, 0x0001, 0x0008, 0x0800
 TPM_RIGHTBUTTON, TPM_NONOTIFY, TPM_RETURNCMD = 0x0002, 0x0080, 0x0100
 
+# Raw Input
+RIDEV_REMOVE, RIDEV_INPUTSINK = 0x0001, 0x0100
+RID_INPUT = 0x10000003
+RIM_TYPEKEYBOARD = 1
+RI_KEY_BREAK, RI_KEY_E0 = 0x01, 0x02
+
+SM_CXICON = 11
 SM_CXSMICON = 49
 ERROR_ALREADY_EXISTS = 183
 
@@ -79,6 +89,28 @@ class _INPUTUNION(ctypes.Union):
 
 class INPUT(ctypes.Structure):
     _fields_ = [("type", W.DWORD), ("u", _INPUTUNION)]
+
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", W.UINT), ("dwTime", W.DWORD)]
+
+
+class RAWINPUTDEVICE(ctypes.Structure):
+    _fields_ = [("usUsagePage", W.USHORT), ("usUsage", W.USHORT), ("dwFlags", W.DWORD),
+                ("hwndTarget", W.HWND)]
+
+
+class RAWINPUTHEADER(ctypes.Structure):
+    _fields_ = [("dwType", W.DWORD), ("dwSize", W.DWORD), ("hDevice", W.HANDLE), ("wParam", W.WPARAM)]
+
+
+class RAWKEYBOARD(ctypes.Structure):
+    _fields_ = [("MakeCode", W.USHORT), ("Flags", W.USHORT), ("Reserved", W.USHORT),
+                ("VKey", W.USHORT), ("Message", W.UINT), ("ExtraInformation", W.ULONG)]
+
+
+class RAWINPUT_KEYBOARD(ctypes.Structure):
+    _fields_ = [("header", RAWINPUTHEADER), ("keyboard", RAWKEYBOARD)]
 
 
 def _f(dll, name, restype, *argtypes):
@@ -132,6 +164,11 @@ ToUnicodeEx = _f(user32, "ToUnicodeEx", ctypes.c_int, W.UINT, W.UINT, ctypes.POI
 MapVirtualKeyExW = _f(user32, "MapVirtualKeyExW", W.UINT, W.UINT, W.UINT, W.HKL)
 SendInput = _f(user32, "SendInput", W.UINT, W.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
 GetAsyncKeyState = _f(user32, "GetAsyncKeyState", W.SHORT, ctypes.c_int)
+GetLastInputInfo = _f(user32, "GetLastInputInfo", W.BOOL, ctypes.POINTER(LASTINPUTINFO))
+RegisterRawInputDevices = _f(user32, "RegisterRawInputDevices", W.BOOL, ctypes.POINTER(RAWINPUTDEVICE),
+                             W.UINT, W.UINT)
+GetRawInputData = _f(user32, "GetRawInputData", W.UINT, W.HANDLE, W.UINT, W.LPVOID,
+                     ctypes.POINTER(W.UINT), W.UINT)
 
 # user32 — буфер обміну
 OpenClipboard = _f(user32, "OpenClipboard", W.BOOL, W.HWND)
@@ -158,9 +195,12 @@ GlobalFree = _f(kernel32, "GlobalFree", W.HGLOBAL, W.HGLOBAL)
 GetModuleHandleW = _f(kernel32, "GetModuleHandleW", W.HMODULE, W.LPCWSTR)
 CreateMutexW = _f(kernel32, "CreateMutexW", W.HANDLE, W.LPVOID, W.BOOL, W.LPCWSTR)
 LCIDToLocaleName = _f(kernel32, "LCIDToLocaleName", ctypes.c_int, W.DWORD, W.LPWSTR, ctypes.c_int, W.DWORD)
+GetTickCount = _f(kernel32, "GetTickCount", W.DWORD)
 
 # shell32
 Shell_NotifyIconW = _f(shell32, "Shell_NotifyIconW", W.BOOL, W.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
+SHQueryUserNotificationState = _f(shell32, "SHQueryUserNotificationState", ctypes.c_long,
+                                  ctypes.POINTER(ctypes.c_int))
 
 
 def sleep_pumping(seconds):

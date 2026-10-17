@@ -20,9 +20,41 @@ Works with any installed layouts (EN/UK/DE/PL/…): character tables are built f
 system layouts, nothing is hard-coded. The target is the next layout in the Windows list
 after the one the text was typed in.
 
-The icon is [`languages`](https://lucide.dev/icons/languages) from Lucide (ISC).
+### More tools
+
+Each of these has its own hotkey and works on the selection or the last word, just like
+the layout conversion, including reselecting the result:
+
+| Default hotkey | Action | Tray flash |
+|----------------|--------|------------|
+| `Pause`        | Convert to the next keyboard layout | blue |
+| `Alt+Pause`    | **Change case** in a cycle: `lower` → `UPPER` → `Title` → `camelCase` → `snake_case` → `kebab-case` | green |
+| `Ctrl+Pause`   | **Transliterate** Ukrainian into Latin using the official system (Cabinet of Ministers Resolution No. 55, 2010): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka` | purple |
+
+Case changing works out the current style and moves to the next one. Pressing the hotkey
+again on the result keeps going round from the original text, so `kebab-case` → `lower`
+puts the spaces back.
+
+You don't have to release the modifier between steps, just like `Alt+Tab`: hold `Alt` and
+press `Pause` as many times as you need (`Alt` + `Pause` `Pause` `Pause`). Each press is
+applied right away and the tray icon blinks. This works for every hotkey that has a modifier,
+layout conversion included. While the modifier is held, the app releases it *logically*
+(otherwise the target app would receive `Ctrl+Alt+C` instead of `Ctrl+C`). It tracks the
+physical key state through Raw Input, only for as long as the modifier is held, and
+temporarily catches the bare key (`Pause`) so it does not reach the app. If you stop pressing
+for 10 seconds, holding ends and the modifier state is restored.
+
+**Eye breaks (20-20-20).** Every 20 minutes of screen time a quiet notification reminds you
+to look at something about 6 m away for 20 seconds. It closes by itself after 5 seconds
+(`eye_break_popup_seconds`). It does not show up while a fullscreen app, presentation or
+Do Not Disturb is active, or while the microphone or camera is in use (a call). In those cases
+it waits until they end. If you step away from the computer for 5 minutes (or it sleeps),
+the countdown starts over. You can turn it on or off from the tray menu.
+
+The icon is [`languages`](https://lucide.dev/icons/languages) from Lucide (ISC); the eye
+break notification uses [`hat-glasses`](https://lucide.dev/icons/hat-glasses) in a blue circle.
 In the tray it adapts to the light/dark taskbar theme, turns grey when disabled, and
-briefly flashes blue each time the hotkey is handled.
+briefly flashes in the action's color each time a hotkey is handled.
 
 ## Running
 
@@ -38,23 +70,30 @@ Or build the exe (see below) and run `KeyboardLayoutSwitcher.exe`.
 ## Tray
 
 - **Double-click** — settings window.
-- **Right-click** — menu: Enabled, Settings…, Open config.ini, Reload config.ini, Exit.
+- **Right-click** — menu: current hotkeys, Enabled, 20-20-20 eye breaks, Settings…,
+  Open config.ini, Reload config.ini, Exit.
 
 ## Settings
 
-The settings window has: the hotkey (click the field and press the combination),
+The settings window has: three hotkeys (click a field and press the combination;
+`Backspace` clears the case/transliteration hotkey and turns the action off),
 enable/disable, layout switching, reselecting converted text, **start with Windows**,
-and the copy timeout.
+the copy timeout, and eye break reminders with their interval.
 
 Everything is stored in `config.ini` next to `main.py` / the exe (created on first run):
 
 | Key               | Default  | Description |
 |-------------------|----------|-------------|
-| `hotkey`          | `Pause`  | Combination: `Ctrl`/`Alt`/`Shift`/`Win` + key. Examples: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
-| `enabled`         | `true`   | React to the hotkey. |
+| `hotkey`          | `Pause`  | Layout conversion. Combination: `Ctrl`/`Alt`/`Shift`/`Win` + key. Examples: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
+| `case_hotkey`     | `Alt+Pause` | Case change. Empty — off. |
+| `translit_hotkey` | `Ctrl+Pause` | Transliteration. Empty — off. |
+| `enabled`         | `true`   | React to the hotkeys. |
 | `switch_layout`   | `true`   | Switch the active window's layout after converting. |
 | `reselect`        | `true`   | Select the converted text again after converting a selection (skipped for text longer than 5000 characters). |
 | `copy_timeout_ms` | `250`    | How long to wait for the app to put text on the clipboard after `Ctrl+C`. Increase for slow apps. |
+| `eye_breaks`      | `true`   | 20-20-20 eye break reminders. |
+| `eye_break_minutes` | `20`   | Reminder interval in minutes (1–240). |
+| `eye_break_popup_seconds` | `5` | How long the notification stays before closing itself, in seconds (0–120; `0` lets Windows decide). |
 
 After editing the file manually, use “Reload config.ini” in the tray menu. The app writes
 the file atomically (via a temporary `config.ini.tmp`), so a failed write never corrupts
@@ -64,7 +103,8 @@ Key names: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Pause`, `Space`, `Tab`, `Enter`,
 `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Left`/`Up`/`Right`/`Down`,
 `CapsLock`, `ScrollLock`, `PrintScreen`, `Apps`, `Num0`–`Num9`, `NumPlus`, `NumMinus`,
 `NumMul`, `NumDiv`, `NumDecimal`, `` ` `` `-` `=` `[` `]` `\` `;` `'` `,` `.` `/`,
-or any virtual-key code as `VKxx` (hex).
+or any virtual-key code as `VKxx` (hex). With `Ctrl` held, most keyboards send `Pause`
+as `Break`, and `Ctrl+Pause` catches both.
 
 Autostart is the `KeyboardLayoutSwitcher` value under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (no admin rights needed).
@@ -108,8 +148,9 @@ For an app that sits in the tray all the time and starts with Windows, `-OneDir`
 better (less RAM, faster start). Use the single file when easy sharing matters more.
 
 Resources: ~25 MB RAM in the background (onefile additionally keeps a ~10 MB bootloader
-process), 0% CPU — no keyboard hooks or polling, just `RegisterHotKey`. Tk is loaded
-only when the settings window is opened for the first time.
+process), 0% CPU — no keyboard hooks or polling, just `RegisterHotKey` (plus Raw Input
+only while a hotkey modifier is held, and one timer check per minute for eye breaks). Tk
+is loaded only when the settings window is opened for the first time.
 
 ## How it works
 
@@ -170,9 +211,43 @@ plays and the reason is logged) if:
 будуються з системних розкладок, нічого не зашито. Напрям — наступна розкладка
 в списку Windows після тієї, в якій набрано текст.
 
-Іконка — [`languages`](https://lucide.dev/icons/languages) з Lucide (ISC),
+### Інші інструменти
+
+Кожен має свою гарячу клавішу й працює з виділенням або останнім словом так само, як
+конвертація розкладки, зокрема з повторним виділенням результату:
+
+| Клавіша за замовчуванням | Дія | Колір у треї |
+|--------------------------|-----|--------------|
+| `Pause`      | Конвертація в наступну розкладку | синій |
+| `Alt+Pause`  | **Регістр** по колу: `lower` → `UPPER` → `Title` → `camelCase` → `snake_case` → `kebab-case` | зелений |
+| `Ctrl+Pause` | **Транслітерація** українського тексту латиницею за офіційною системою (постанова КМУ № 55 від 2010 р.): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka` | фіолетовий |
+
+Регістр визначає поточний стиль тексту й переходить до наступного. Повторні натискання
+на результаті йдуть далі по колу від початкового тексту, тож `kebab-case` → `lower`
+повертає пробіли.
+
+Модифікатор між кроками відпускати не треба, як з `Alt+Tab`: тримайте `Alt` і натискайте
+`Pause` скільки потрібно (`Alt` + `Pause` `Pause` `Pause`). Кожне натискання застосовується
+одразу, іконка в треї блимає. Так працюють усі гарячі клавіші з модифікатором, зокрема
+конвертація розкладки. Поки модифікатор утримується, програма *логічно* його відпускає
+(інакше програма отримала б `Ctrl+Alt+C` замість `Ctrl+C`). Фізичний стан клавіш вона
+стежить через Raw Input лише на час утримання, а саму клавішу (`Pause`) тимчасово
+перехоплює, щоб та не дійшла до програми. Якщо 10 секунд нічого не натискати, утримання
+завершується, а стан модифікатора повертається.
+
+**Перерви для очей (20-20-20).** Кожні 20 хвилин роботи за екраном тихе сповіщення
+нагадує подивитися 20 секунд на щось на відстані ~6 м. Закривається саме через 5 секунд
+(`eye_break_popup_seconds`). Не з'являється, поки відкрито повноекранну програму чи
+презентацію, увімкнено «Не турбувати» або зайнятий мікрофон чи камера (дзвінок). Тоді
+нагадування чекає, доки це закінчиться. Якщо ви відійшли від комп'ютера на 5 хвилин (або
+він спав), відлік починається заново. Вмикається й вимикається в меню трею.
+
+Іконка сповіщення про перерву — [`hat-glasses`](https://lucide.dev/icons/hat-glasses)
+з Lucide (ISC) у синьому колі.
+
+Іконка програми — [`languages`](https://lucide.dev/icons/languages) з Lucide (ISC),
 в треї підлаштовується під світлу/темну тему панелі задач, сіра — коли вимкнено,
-і коротко блимає синім щоразу, коли гаряча клавіша оброблена.
+і коротко блимає кольором дії щоразу, коли гаряча клавіша оброблена.
 
 ## Запуск
 
@@ -188,24 +263,30 @@ plays and the reason is logged) if:
 ## Трей
 
 - **Подвійний клік** — вікно налаштувань.
-- **Правий клік** — меню: Увімкнено, Налаштування…, Відкрити config.ini,
-  Перечитати config.ini, Вихід.
+- **Правий клік** — меню: поточні гарячі клавіші, Увімкнено, Нагадування 20-20-20,
+  Налаштування…, Відкрити config.ini, Перечитати config.ini, Вихід.
 
 ## Налаштування
 
-Вікно налаштувань: гаряча клавіша (клацніть у поле й натисніть комбінацію),
+Вікно налаштувань: три гарячі клавіші (клацніть у поле й натисніть комбінацію;
+`Backspace` очищує клавішу регістру/транслітерації й вимикає дію),
 увімкнення, перемикання розкладки, повторне виділення, **запуск разом з Windows**,
-затримка очікування копіювання.
+затримка очікування копіювання, нагадування для очей та їхній інтервал.
 
 Усе зберігається в `config.ini` поруч із `main.py` / exe (створюється при першому запуску):
 
 | Ключ              | За замовчуванням | Опис |
 |-------------------|------------------|------|
-| `hotkey`          | `Pause`          | Комбінація: `Ctrl`/`Alt`/`Shift`/`Win` + клавіша. Приклади: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
-| `enabled`         | `true`           | Реагувати на гарячу клавішу. |
+| `hotkey`          | `Pause`          | Конвертація розкладки. Комбінація: `Ctrl`/`Alt`/`Shift`/`Win` + клавіша. Приклади: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
+| `case_hotkey`     | `Alt+Pause`      | Зміна регістру. Порожньо — вимкнено. |
+| `translit_hotkey` | `Ctrl+Pause`     | Транслітерація. Порожньо — вимкнено. |
+| `enabled`         | `true`           | Реагувати на гарячі клавіші. |
 | `switch_layout`   | `true`           | Після конвертації перемикати розкладку активного вікна. |
 | `reselect`        | `true`           | Після конвертації виділеного тексту виділяти його знову (для тексту довшого за 5000 символів пропускається). |
 | `copy_timeout_ms` | `250`            | Скільки чекати, поки програма віддасть текст на `Ctrl+C`. Збільште для повільних програм. |
+| `eye_breaks`      | `true`           | Нагадування 20-20-20 для очей. |
+| `eye_break_minutes` | `20`           | Інтервал нагадувань, хв (1–240). |
+| `eye_break_popup_seconds` | `5`      | Через скільки секунд сповіщення закривається само (0–120; `0` — як вирішить Windows). |
 
 Після ручного редагування — меню трею «Перечитати config.ini». Програма записує файл
 атомарно (через тимчасовий `config.ini.tmp`), тож збій запису не пошкодить чинний файл.
@@ -214,7 +295,8 @@ plays and the reason is logged) if:
 `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Left`/`Up`/`Right`/`Down`,
 `CapsLock`, `ScrollLock`, `PrintScreen`, `Apps`, `Num0`–`Num9`, `NumPlus`, `NumMinus`,
 `NumMul`, `NumDiv`, `NumDecimal`, `` ` `` `-` `=` `[` `]` `\` `;` `'` `,` `.` `/`,
-або будь-який віртуальний код як `VKxx` (hex).
+або будь-який віртуальний код як `VKxx` (hex). З `Ctrl` більшість клавіатур надсилає
+`Pause` як `Break`, тож `Ctrl+Pause` ловить обидва варіанти.
 
 Автозапуск — значення `KeyboardLayoutSwitcher` у
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (без прав адміністратора).
@@ -258,8 +340,9 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 (менше RAM, швидший старт). Один файл — коли важливіше, щоб його було легко передати.
 
 Ресурси: у фоні ~25 MB RAM (onefile додатково тримає процес-завантажувач ~10 MB),
-0% CPU — жодних хуків клавіатури чи опитування, лише `RegisterHotKey`. Tk підвантажується
-тільки при першому відкритті налаштувань.
+0% CPU — жодних хуків клавіатури чи опитування, лише `RegisterHotKey` (плюс Raw Input
+тільки поки утримується модифікатор гарячої клавіші й одна перевірка таймера на хвилину для
+перерв). Tk підвантажується тільки при першому відкритті налаштувань.
 
 ## Як це працює
 
