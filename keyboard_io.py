@@ -69,6 +69,16 @@ def paste():
     press(VK_V, (VK_CONTROL,))
 
 
+def extend_left_and_copy():
+    press(VK_LEFT, (VK_SHIFT,))
+    copy()
+
+
+def extend_right_and_copy():
+    press(VK_RIGHT, (VK_SHIFT,))
+    copy()
+
+
 def select_word_left_and_copy():
     press(VK_LEFT, (VK_CONTROL, VK_SHIFT))
     copy()

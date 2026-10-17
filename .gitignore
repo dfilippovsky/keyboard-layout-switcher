@@ -5,3 +5,4 @@ dist/
 *.spec
 config.ini
 layout_switcher.log
+config.ini.tmp
