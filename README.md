@@ -59,6 +59,10 @@ the layout conversion, including reselecting the result:
 | `Pause`        | Convert to the next keyboard layout | blue |
 | `Alt+Pause`    | **Change case** in a cycle: `lower` → `UPPER` → `Title` → `camelCase` → `snake_case` → `kebab-case` | green |
 | `Ctrl+Pause`   | **Transliterate** Ukrainian into Latin using the official system (Cabinet of Ministers Resolution No. 55, 2010): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka` | purple |
+| `Shift+Pause`  | **Ukrainian typography** (plugin `ua_typography`): `'` → `ʼ` inside words, `"…"` → `«…»` (nested `„…“`), ` - ` → ` — ` with a non-breaking space before it, `...` → `…`, repeated spaces → one | pink |
+
+Plugins add more actions (see [Plugins](#plugins)). All actions are also in the tray menu
+under **Actions**.
 
 Case changing works out the current style and moves to the next one. Pressing the hotkey
 again on the result keeps going round from the original text, so `kebab-case` → `lower`
@@ -72,6 +76,42 @@ layout conversion included. While the modifier is held, the app releases it *log
 physical key state through Raw Input, only for as long as the modifier is held, and
 temporarily catches the bare key (`Pause`) so it does not reach the app. If you stop pressing
 for 10 seconds, holding ends and the modifier state is restored.
+
+<a id="plugins"></a>
+
+### Plugins
+
+A plugin is a Python file in the `plugins\` folder next to the app (tray menu →
+**Open plugins folder**). Each file registers its actions, and each action gets an optional
+hotkey and a tray menu item:
+
+```python
+# plugins\my_tools.py
+def register(api):
+    # Acts on the selection, or the word before the caret, like the built-in actions
+    api.text_action("upper", "UPPER CASE", str.upper, hotkey="Ctrl+Alt+U")
+    # Any code: ctx.window, ctx.notify(), ctx.edit_text(), ctx.type_text()
+    api.action("hello", "Say hello", lambda ctx: ctx.notify("Hello!"))
+```
+
+- The full action id is `<file>.<id>`, e.g. `my_tools.upper`. A hotkey can be overridden or
+  turned off (empty value) in the `[plugins]` section of `config.ini` or in the settings
+  window. Only overrides are stored there, so a plugin's new default hotkey is picked up
+  automatically.
+- Files starting with `_` are not loaded. [`plugins\_template.py`](plugins/_template.py)
+  describes the whole API: copy it under a new name.
+- Bundled plugins: `ua_typography` (`Shift+Pause`, see above) and `lines` (sort lines,
+  remove duplicates, reverse, number them; menu only).
+- After adding or changing a plugin, use **Reload config.ini and plugins** in the tray menu.
+  If a plugin fails to load or one of its actions raises an error, a tray notification
+  says which one, and the details go to `layout_switcher.log`. The other plugins keep working.
+- Plugins run inside the app with its rights. Install only plugins you trust.
+- In the built exe, a plugin can use only the parts of the Python standard library that are
+  bundled: everything the app uses, plus `json`, `csv`, `html`, `textwrap`,
+  `unicodedata`, `difflib`, `datetime`, `random`, `secrets`, `uuid`, `hashlib`, `base64`,
+  `statistics`, `decimal`, `urllib.request`/`http.client`/`ssl` (HTTPS requests),
+  `webbrowser` and a few more (see `$forPlugins` in `build.ps1`). Run from source, the
+  whole standard library is available.
 
 **Eye breaks (20-20-20).** Every 20 minutes of screen time a quiet notification reminds you
 to look at something about 6 m away for 20 seconds. It closes by itself after 5 seconds
@@ -99,13 +139,19 @@ Or build the exe (see below) and run `KeyboardLayoutSwitcher.exe`.
 ## Tray
 
 - **Double-click** — settings window.
-- **Right-click** — menu: current hotkeys, Enabled, Auto-correct layout while typing,
-  20-20-20 eye breaks, Settings…, Open config.ini, Reload config.ini, Exit.
+- **Right-click** — menu: **Actions** (every action with its hotkey; it runs on the window
+  that was active before you clicked the tray), Enabled, Auto-correct layout while typing,
+  20-20-20 eye breaks, Settings…, Open config.ini, Reload config.ini and plugins,
+  Open plugins folder, Exit.
+
+The app finds the previously active window through a `WinEvent` foreground notification,
+which is not a keyboard hook.
 
 ## Settings
 
-The settings window has: three hotkeys (click a field and press the combination;
-`Backspace` clears the case/transliteration hotkey and turns the action off),
+The settings window has: three hotkeys and the hotkeys of plugin actions (click a field
+and press the combination; `Backspace` clears it and turns the action off; the layout
+hotkey cannot be cleared),
 enable/disable, layout switching, reselecting converted text, auto-correct while typing
 and the programs where it is off, **start with Windows**, the copy timeout, and eye break
 reminders with their interval.
@@ -127,12 +173,16 @@ Everything is stored in `config.ini` next to `main.py` / the exe (created on fir
 | `eye_break_minutes` | `20`   | Reminder interval in minutes (1–240). |
 | `eye_break_popup_seconds` | `5` | How long the notification stays before closing itself, in seconds (0–120; `0` lets Windows decide). |
 
-After editing the file manually, use “Reload config.ini” in the tray menu. The app writes
+The `[plugins]` section holds plugin hotkey overrides: `<action id> = <combination>` (an
+empty value turns the hotkey off), e.g. `lines.sort = Ctrl+Alt+S`.
+
+After editing the file manually, use “Reload config.ini and plugins” in the tray menu. The app writes
 the file atomically (via a temporary `config.ini.tmp`), so a failed write never corrupts
 the existing file. If `config.ini` comes from an older version and is missing some keys,
 they are appended to the `[general]` section on load. Nothing else in the file changes:
 values, your comments, extra keys and sections stay as they are. Saving from the settings
-window or the tray menu rewrites the file from the template.
+window or the tray menu rewrites the file from the template (the `[plugins]` section is
+kept).
 
 Key names: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Pause`, `Space`, `Tab`, `Enter`, `Esc`,
 `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Left`/`Up`/`Right`/`Down`,
@@ -156,12 +206,15 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 ## Building the exe
 
 ```powershell
-.\build.ps1           # dist\KeyboardLayoutSwitcher.exe — single file (~12 MB)
+.\build.ps1           # dist\KeyboardLayoutSwitcher.exe — single file (~13 MB)
 .\build.ps1 -OneDir   # dist\KeyboardLayoutSwitcher\ — folder: faster start, one process
 ```
 
 The script uses `.venv` if present, installs PyInstaller from `requirements-dev.txt`,
-generates `app.ico` from the same icon and bundles `langdata\` into the exe.
+generates `app.ico` from the same icon, bundles `langdata\` and the standard library
+modules meant for plugins into the exe, and copies `plugins\*.py` next to it. Your own
+plugins there are left alone. The bundled ones are overwritten with the repository version,
+so to change one, copy it under a different name first.
 
 The language data for auto-correct (`langdata\*.txt.gz`) is generated by
 `python tools\build_langdata.py [en uk …]` from the
@@ -176,7 +229,7 @@ Same app, the only difference is packaging and startup:
 
 |                  | Single file (default)                                  | Folder (`-OneDir`)                          |
 |------------------|--------------------------------------------------------|---------------------------------------------|
-| Output           | one `KeyboardLayoutSwitcher.exe` (~12 MB)              | folder with the exe and `_internal\` (Python, Tcl/Tk) |
+| Output           | one `KeyboardLayoutSwitcher.exe` (~13 MB)              | folder with the exe and `_internal\` (Python, Tcl/Tk) |
 | Startup          | unpacks itself into `%TEMP%\_MEIxxxxx` every time      | starts right away, nothing to unpack        |
 | Processes        | two: bootloader (~10 MB) + the app                     | one                                         |
 | Start time       | slower                                                 | faster                                      |
@@ -184,12 +237,12 @@ Same app, the only difference is packaging and startup:
 | Antivirus        | more often suspicious of self-extracting exes          | less often                                  |
 | Distribution     | one file — easy to copy/share                          | the whole folder has to be moved            |
 
-In both cases `config.ini` and the log live next to the exe, and autostart points to the exe.
-`build.ps1` keeps the existing `config.ini` there (for `-OneDir` too, where PyInstaller
-recreates the whole folder) and adds the keys of the new version to it; if there is no file
-yet, it creates one with the defaults. While building, a copy of the config is kept in `build\`.
-It is put back even if the build fails, and a copy left behind by an interrupted build is
-restored on the next run.
+In both cases `config.ini`, `autocorrect_exceptions.txt`, `plugins\` and the log live next
+to the exe, and autostart points to the exe. `build.ps1` keeps your files there, for
+`-OneDir` too, where PyInstaller recreates the whole folder. It also adds the keys of the new
+version to `config.ini`; if there is no file yet, it creates one with the defaults. While
+building, a copy of these files is kept in `build\`. It is put back even if the build fails,
+and a copy left behind by an interrupted build is restored on the next run.
 
 For an app that sits in the tray all the time and starts with Windows, `-OneDir` is a bit
 better (less RAM, faster start). Use the single file when easy sharing matters more.
@@ -306,6 +359,10 @@ plays and the reason is logged) if:
 | `Pause`      | Конвертація в наступну розкладку | синій |
 | `Alt+Pause`  | **Регістр** по колу: `lower` → `UPPER` → `Title` → `camelCase` → `snake_case` → `kebab-case` | зелений |
 | `Ctrl+Pause` | **Транслітерація** українського тексту латиницею за офіційною системою (постанова КМУ № 55 від 2010 р.): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka` | фіолетовий |
+| `Shift+Pause` | **Українська типографіка** (плагін `ua_typography`): `'` → `ʼ` усередині слів, `"…"` → `«…»` (вкладені `„…“`), ` - ` → ` — ` з нерозривним пробілом перед ним, `...` → `…`, кілька пробілів → один | рожевий |
+
+Плагіни додають інші дії (див. [Плагіни](#plugins-uk)). Усі дії є й у меню трею, у пункті
+**Дії**.
 
 Регістр визначає поточний стиль тексту й переходить до наступного. Повторні натискання
 на результаті йдуть далі по колу від початкового тексту, тож `kebab-case` → `lower`
@@ -319,6 +376,42 @@ plays and the reason is logged) if:
 стежить через Raw Input лише на час утримання, а саму клавішу (`Pause`) тимчасово
 перехоплює, щоб та не дійшла до програми. Якщо 10 секунд нічого не натискати, утримання
 завершується, а стан модифікатора повертається.
+
+<a id="plugins-uk"></a>
+
+### Плагіни
+
+Плагін — це Python-файл у папці `plugins\` поруч із програмою (меню трею → **Відкрити папку
+плагінів**). Кожен файл реєструє свої дії, і кожна дія отримує необов'язкову гарячу
+клавішу та пункт у меню трею:
+
+```python
+# plugins\my_tools.py
+def register(api):
+    # Працює з виділенням або словом перед курсором, як вбудовані дії
+    api.text_action("upper", "ВЕЛИКІ ЛІТЕРИ", str.upper, hotkey="Ctrl+Alt+U")
+    # Довільний код: ctx.window, ctx.notify(), ctx.edit_text(), ctx.type_text()
+    api.action("hello", "Привітання", lambda ctx: ctx.notify("Привіт!"))
+```
+
+- Повний ідентифікатор дії — `<файл>.<id>`, наприклад `my_tools.upper`. Гарячу клавішу можна
+  перевизначити або вимкнути (порожнім значенням) у секції `[plugins]` файлу `config.ini`
+  чи у вікні налаштувань. Там зберігаються лише перевизначення, тож нову типову клавішу
+  плагіна буде підхоплено автоматично.
+- Файли, що починаються з `_`, не завантажуються. У [`plugins\_template.py`](plugins/_template.py)
+  описано весь API: скопіюйте його під новим ім'ям.
+- Плагіни в комплекті: `ua_typography` (`Shift+Pause`, див. вище) і `lines` (упорядкувати
+  рядки, прибрати повтори, розвернути, пронумерувати; лише з меню).
+- Після додавання чи зміни плагіна — меню трею **Перечитати config.ini і плагіни**. Якщо
+  плагін не завантажився або його дія впала з помилкою, сповіщення в треї скаже, який саме,
+  а подробиці підуть у `layout_switcher.log`. Решта плагінів працює далі.
+- Плагіни виконуються всередині програми з її правами. Ставте лише ті, яким довіряєте.
+- У зібраному exe плагіну доступна лише та частина стандартної бібліотеки Python, яка є
+  в exe: усе, чим користується сама програма, плюс `json`, `csv`, `html`, `textwrap`,
+  `unicodedata`, `difflib`, `datetime`, `random`, `secrets`, `uuid`, `hashlib`, `base64`,
+  `statistics`, `decimal`, `urllib.request`/`http.client`/`ssl` (HTTPS-запити),
+  `webbrowser` та ще кілька модулів (див. `$forPlugins` у `build.ps1`). Під час запуску
+  з вихідного коду доступна вся стандартна бібліотека.
 
 **Перерви для очей (20-20-20).** Кожні 20 хвилин роботи за екраном тихе сповіщення
 нагадує подивитися 20 секунд на щось на відстані ~6 м. Закривається саме через 5 секунд
@@ -348,14 +441,19 @@ plays and the reason is logged) if:
 ## Трей
 
 - **Подвійний клік** — вікно налаштувань.
-- **Правий клік** — меню: поточні гарячі клавіші, Увімкнено, Автовиправлення розкладки
-  під час набору, Нагадування 20-20-20, Налаштування…, Відкрити config.ini,
-  Перечитати config.ini, Вихід.
+- **Правий клік** — меню: **Дії** (усі дії з гарячими клавішами; виконуються для вікна,
+  яке було активним до кліку по треї), Увімкнено, Автовиправлення розкладки під час набору,
+  Нагадування 20-20-20, Налаштування…, Відкрити config.ini, Перечитати config.ini і плагіни,
+  Відкрити папку плагінів, Вихід.
+
+Попереднє активне вікно програма визначає через сповіщення `WinEvent` про зміну активного
+вікна, а не через хук клавіатури.
 
 ## Налаштування
 
-Вікно налаштувань: три гарячі клавіші (клацніть у поле й натисніть комбінацію;
-`Backspace` очищує клавішу регістру/транслітерації й вимикає дію),
+Вікно налаштувань: три гарячі клавіші й гарячі клавіші дій з плагінів (клацніть у поле
+й натисніть комбінацію; `Backspace` очищує клавішу й вимикає дію; клавішу розкладки
+очистити не можна),
 увімкнення, перемикання розкладки, повторне виділення, автовиправлення під час набору
 і програми, де воно вимкнене, **запуск разом з Windows**, затримка очікування копіювання,
 нагадування для очей та їхній інтервал.
@@ -377,12 +475,16 @@ plays and the reason is logged) if:
 | `eye_break_minutes` | `20`           | Інтервал нагадувань, хв (1–240). |
 | `eye_break_popup_seconds` | `5`      | Через скільки секунд сповіщення закривається само (0–120; `0` — як вирішить Windows). |
 
-Після ручного редагування — меню трею «Перечитати config.ini». Програма записує файл
+У секції `[plugins]` зберігаються перевизначення гарячих клавіш плагінів:
+`<id дії> = <комбінація>` (порожнє значення вимикає клавішу), наприклад
+`lines.sort = Ctrl+Alt+S`.
+
+Після ручного редагування — меню трею «Перечитати config.ini і плагіни». Програма записує файл
 атомарно (через тимчасовий `config.ini.tmp`), тож збій запису не пошкодить чинний файл.
 Якщо `config.ini` від старішої версії і в ньому бракує ключів, вони дописуються в секцію
 `[general]` при завантаженні. Решта файлу не змінюється: значення, ваші коментарі, зайві
 ключі й секції лишаються як є. Збереження з вікна налаштувань чи меню трею переписує файл
-за шаблоном.
+за шаблоном (секція `[plugins]` зберігається).
 
 Назви клавіш: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Pause`, `Space`, `Tab`, `Enter`, `Esc`,
 `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Left`/`Up`/`Right`/`Down`,
@@ -406,12 +508,15 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 ## Збірка exe
 
 ```powershell
-.\build.ps1           # dist\KeyboardLayoutSwitcher.exe — один файл (~12 MB)
+.\build.ps1           # dist\KeyboardLayoutSwitcher.exe — один файл (~13 MB)
 .\build.ps1 -OneDir   # dist\KeyboardLayoutSwitcher\ — папка: швидший старт, один процес
 ```
 
 Скрипт використовує `.venv`, якщо він є, ставить PyInstaller з `requirements-dev.txt`,
-генерує `app.ico` з тієї ж іконки і вкладає `langdata\` в exe.
+генерує `app.ico` з тієї ж іконки, вкладає в exe `langdata\` і модулі стандартної
+бібліотеки для плагінів, а `plugins\*.py` копіює поруч з exe. Ваші власні плагіни там
+лишаються недоторканими. Плагіни з комплекту перезаписуються версією з репозиторію, тож
+щоб змінити такий плагін, спершу скопіюйте його під іншим ім'ям.
 
 Мовні дані автовиправлення (`langdata\*.txt.gz`) генерує
 `python tools\build_langdata.py [en uk …]` з частотних словників
@@ -425,7 +530,7 @@ CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, д
 
 |                     | Один файл (за замовчуванням)                     | Папка (`-OneDir`)                         |
 |---------------------|--------------------------------------------------|-------------------------------------------|
-| Результат           | один `KeyboardLayoutSwitcher.exe` (~12 MB)       | папка з exe і `_internal\` (Python, Tcl/Tk) |
+| Результат           | один `KeyboardLayoutSwitcher.exe` (~13 MB)       | папка з exe і `_internal\` (Python, Tcl/Tk) |
 | Запуск              | щоразу розпаковує себе в `%TEMP%\_MEIxxxxx`      | запускається одразу, без розпаковки       |
 | Процеси             | два: завантажувач (~10 MB) + програма            | один                                      |
 | Старт               | повільніший                                      | швидший                                   |
@@ -433,12 +538,12 @@ CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, д
 | Антивіруси          | частіше насторожено ставляться до самопакованих exe | рідше                                  |
 | Поширення           | один файл — зручно скопіювати/передати           | треба переносити всю папку                |
 
-В обох варіантах `config.ini` і лог лежать поруч з exe, автозапуск вказує на exe.
-`build.ps1` зберігає наявний там `config.ini` (і для `-OneDir`, де PyInstaller перестворює
-всю папку) та дописує в нього ключі нової версії; якщо файлу ще немає — створює його
-з налаштуваннями за замовчуванням. На час збірки копія конфігу лежить у `build\`. Вона
-повертається навіть тоді, коли збірка падає, а копія, що лишилася від перерваної збірки,
-відновлюється при наступному запуску.
+В обох варіантах `config.ini`, `autocorrect_exceptions.txt`, `plugins\` і лог лежать поруч
+з exe, автозапуск вказує на exe. `build.ps1` зберігає ваші файли там, і для `-OneDir` теж,
+де PyInstaller перестворює всю папку. У `config.ini` він дописує ключі нової версії; якщо
+файлу ще немає — створює його з налаштуваннями за замовчуванням. На час збірки копія цих
+файлів лежить у `build\`. Вона повертається навіть тоді, коли збірка падає, а копія, що
+лишилася від перерваної збірки, відновлюється при наступному запуску.
 
 Для програми, що постійно висить у треї й стартує з Windows, трохи вигідніший `-OneDir`
 (менше RAM, швидший старт). Один файл — коли важливіше, щоб його було легко передати.

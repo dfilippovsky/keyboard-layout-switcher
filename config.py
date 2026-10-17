@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import winreg
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 APP_NAME = "KeyboardLayoutSwitcher"
 
@@ -52,6 +52,12 @@ eye_break_minutes = {eye_break_minutes}
 eye_break_popup_seconds = {eye_break_popup_seconds}
 """
 
+_PLUGINS_HEADER = """
+[plugins]
+; Гарячі клавіші дій з плагінів (plugins\\*.py): id дії = комбінація; порожньо — вимкнено.
+; Дії, яких тут немає, використовують комбінацію, яку задав сам плагін.
+"""
+
 HOTKEY_FIELDS = ("hotkey", "case_hotkey", "translit_hotkey")
 _SECTION_RE = re.compile(r"\[(?P<name>.+)\]$")
 _INLINE_COMMENT_RE = re.compile(r"\s[;#]")
@@ -81,6 +87,8 @@ class Config:
     eye_breaks: bool = True
     eye_break_minutes: int = 20
     eye_break_popup_seconds: int = 5
+    # Секція [plugins]: id дії плагіна -> комбінація (перевизначає ту, що задав плагін)
+    plugin_hotkeys: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path=CONFIG_PATH):
@@ -107,7 +115,9 @@ class Config:
                 setattr(cfg, key, max(lo, min(hi, cp.getint("general", key, fallback=getattr(cfg, key)))))
             except ValueError:
                 pass
-        missing = [key for key in asdict(cfg) if not cp.has_option("general", key)]
+        if cp.has_section("plugins"):  # порожнє значення = гарячу клавішу дії вимкнено
+            cfg.plugin_hotkeys = {key: value.strip() for key, value in cp.items("plugins")}
+        missing = [key for key in asdict(cfg) if key in _GENERAL_KEYS and not cp.has_option("general", key)]
         if missing:
             try:
                 _append_missing(path, cfg._values(), missing)
@@ -123,7 +133,13 @@ class Config:
         return {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in asdict(self).items()}
 
     def save(self, path=CONFIG_PATH):
-        _write_atomic(path, _TEMPLATE.format(**self._values()))
+        text = _TEMPLATE.format(**self._values())
+        if self.plugin_hotkeys:
+            text += _PLUGINS_HEADER + "".join("%s = %s\n" % item for item in sorted(self.plugin_hotkeys.items()))
+        _write_atomic(path, text)
+
+
+_GENERAL_KEYS = frozenset(Config.__dataclass_fields__) - {"plugin_hotkeys"}  # ключі секції [general]
 
 
 def _write_atomic(path, text, newline=None):
