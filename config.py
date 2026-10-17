@@ -31,7 +31,16 @@ switch_layout = {switch_layout}
 reselect = {reselect}
 ; Скільки чекати (мс), поки програма скопіює текст у буфер після Ctrl+C
 copy_timeout_ms = {copy_timeout_ms}
+; Програми (exe через кому), які без виділення копіюють по Ctrl+C увесь рядок.
+; Лише в них однорядковий текст із переносом у кінці не вважається виділенням.
+line_copy_apps = {line_copy_apps}
 """
+
+DEFAULT_LINE_COPY_APPS = (
+    "code.exe, code - insiders.exe, cursor.exe, windsurf.exe, devenv.exe, sublime_text.exe, "
+    "notepad++.exe, idea64.exe, pycharm64.exe, webstorm64.exe, phpstorm64.exe, rider64.exe, "
+    "clion64.exe, goland64.exe, rubymine64.exe, datagrip64.exe, studio64.exe"
+)
 
 
 @dataclass
@@ -41,6 +50,10 @@ class Config:
     switch_layout: bool = True
     reselect: bool = True
     copy_timeout_ms: int = 250
+    line_copy_apps: str = DEFAULT_LINE_COPY_APPS
+
+    def line_copy_app_set(self):
+        return {a.strip().lower() for a in self.line_copy_apps.split(",") if a.strip()}
 
     @classmethod
     def load(cls):
@@ -52,6 +65,7 @@ class Config:
         cp.read(CONFIG_PATH, encoding="utf-8-sig")
         sec = cp["general"] if cp.has_section("general") else {}
         cfg.hotkey = sec.get("hotkey", cfg.hotkey).strip() or cfg.hotkey
+        cfg.line_copy_apps = sec.get("line_copy_apps", cfg.line_copy_apps).strip()
         for key in ("enabled", "switch_layout", "reselect"):
             try:
                 setattr(cfg, key, cp.getboolean("general", key, fallback=getattr(cfg, key)))

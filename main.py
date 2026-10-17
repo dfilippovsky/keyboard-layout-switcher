@@ -1,6 +1,7 @@
 """Keyboard Layout Switcher — програма в треї, що конвертує текст,
 набраний не в тій розкладці, і перемикає розкладку на наступну."""
 import ctypes
+import dataclasses
 import logging
 import os
 import re
@@ -26,9 +27,15 @@ _PASTE_THRESHOLD = 300   # довший або багаторядковий те
 _PASTE_SETTLE = 0.3      # дати програмі прочитати буфер перед відновленням
 
 
-def _is_line_copy(text):
-    """VS Code, JetBrains тощо без виділення копіюють увесь рядок разом із \\n."""
+def _looks_like_line_copy(text):
+    """Так виглядає Ctrl+C без виділення у VS Code, JetBrains тощо: увесь рядок + \\n."""
     return text.endswith("\n") and text.count("\n") == 1
+
+
+def _abort(reason):
+    """Перервати конвертацію, нічого не змінюючи в тексті."""
+    log.warning("conversion aborted: %s", reason)
+    w.MessageBeep(0)
 
 
 class App:
@@ -175,13 +182,26 @@ class App:
             return ("Комбінацію «%s» не вдалося зареєструвати — можливо, її вже використовує "
                     "інша програма або система." % values["hotkey"])
         w.UnregisterHotKey(self.hwnd, HOTKEY_ID)  # остаточно зареєструється після закриття вікна
-        for key, value in values.items():
-            setattr(self.cfg, key, value)
-        self.cfg.save()
+
+        # Зміни застосовуються або всі, або жодна: спершу автозапуск, потім config.ini,
+        # а якщо збереження не вдалося — відкочуємо автозапуск і налаштування в пам'яті.
+        old_autostart = config.autostart_enabled()
         try:
             config.set_autostart(autostart)
         except OSError as e:
             return "Не вдалося змінити автозапуск: %s" % e
+        backup = dataclasses.replace(self.cfg)
+        for key, value in values.items():
+            setattr(self.cfg, key, value)
+        try:
+            self.cfg.save()
+        except OSError as e:
+            self.cfg = backup
+            try:
+                config.set_autostart(old_autostart)
+            except OSError:
+                log.exception("autostart rollback failed")
+            return "Не вдалося зберегти %s: %s" % (config.CONFIG_PATH, e)
         self.refresh_tray()
         return None
 
@@ -219,19 +239,27 @@ class App:
         current = layouts.current(w.GetWindowThreadProcessId(fg, None))
         timeout = self.cfg.copy_timeout_ms / 1000.0
 
+        # Без знімка буфер не можна чіпати: його вміст було б неможливо повернути.
         snapshot = self.clip.snapshot()
+        if snapshot is None:
+            _abort("clipboard is busy, cannot save its contents")
+            return
         pasted = False
         try:
             text = self.clip.copy_from(kio.copy, timeout)
             log.debug("hotkey: fg=%#x layout=%#x selection=%r", fg, current, text)
-            if text and not _is_line_copy(text):
+            if text and _looks_like_line_copy(text) and \
+                    w.process_exe(fg) in self.cfg.line_copy_app_set():
+                text = None  # редактор скопіював рядок — виділення насправді немає
+            if text:
                 dst, pasted = self._convert_selection(text, hkls, current)
             else:
                 dst = self._convert_last_word(hkls, current, timeout)
         finally:
             if pasted:
                 w.sleep_pumping(_PASTE_SETTLE)
-            self.clip.restore(snapshot)
+            if not self.clip.restore(snapshot):
+                log.warning("clipboard contents were not fully restored")
         if dst and self.cfg.switch_layout:
             layouts.switch(fg, dst)
 
@@ -242,7 +270,11 @@ class App:
         pasted = False
         if conv != text:
             if "\n" in conv or len(conv) > _PASTE_THRESHOLD:
-                self.clip.set_text(conv)
+                # Ctrl+V лише якщо в буфері точно наш текст — інакше замінили б
+                # виділення чужим вмістом.
+                if not self.clip.set_text(conv) or self.clip.get_text() != conv:
+                    _abort("could not put converted text into the clipboard")
+                    return None, False
                 kio.paste()
                 pasted = True
             else:
@@ -260,13 +292,18 @@ class App:
         for _ in range(_MAX_WORD_STEPS):
             t = self.clip.copy_from(kio.select_word_left_and_copy, timeout)
             log.debug("word step: %r", t)
-            if not t or t == selected:
+            if not t:
+                if selected is not None:
+                    # Виділення вже розширене, але його вміст невідомий — замінювати
+                    # не можна. Знімаємо виділення: курсор повертається на правий край.
+                    kio.press(kio.VK_RIGHT)
+                    _abort("copy failed while selecting the last word")
+                return None
+            if t == selected:
                 break
             selected = t
             if _WS.search(selected.rstrip()):
                 break
-        if not selected:
-            return None
 
         core = selected.rstrip()
         suffix = selected[len(core):]
@@ -281,13 +318,22 @@ class App:
         src = layouts.detect_source(word, hkls, current)
         dst = layouts.next_after(src, hkls)
         conv = layouts.convert(word, src, dst)
+        if conv == word:
+            kio.press(kio.VK_RIGHT, (kio.VK_SHIFT,), kio.caret_len(selected))
+            return dst
         # Активний кінець виділення зліва: зсуваємо його вправо за префікс,
         # лишаючи виділеними тільки слово + пробіли після нього, і передруковуємо їх.
-        kio.press(kio.VK_RIGHT, (kio.VK_SHIFT,), kio.caret_len(prefix))
-        if conv != word:
-            kio.type_text(conv + suffix)
-        else:
-            kio.press(kio.VK_RIGHT, (kio.VK_SHIFT,), kio.caret_len(word + suffix))
+        if prefix:
+            kio.press(kio.VK_RIGHT, (kio.VK_SHIFT,), kio.caret_len(prefix))
+            # Перевіряємо, що виділено саме те, що збираємося замінити
+            # (контрол міг інакше обробити Shift+Right).
+            check = self.clip.copy_from(kio.copy, timeout)
+            if check != word + suffix:
+                log.debug("verify: expected %r, got %r", word + suffix, check)
+                kio.press(kio.VK_RIGHT)
+                _abort("selection does not match the word to replace")
+                return None
+        kio.type_text(conv + suffix)
         return dst
 
     # ---------- цикл повідомлень ----------

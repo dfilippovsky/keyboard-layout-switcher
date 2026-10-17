@@ -29,12 +29,17 @@ class Clipboard:
     def _put(self, fmt, data):
         h = w.GlobalAlloc(_GMEM_MOVEABLE, max(len(data), 1))
         if not h:
-            return
+            return False
         p = w.GlobalLock(h)
+        if not p:
+            w.GlobalFree(h)
+            return False
         ctypes.memmove(p, data, len(data))
         w.GlobalUnlock(h)
         if not w.SetClipboardData(fmt, h):
             w.GlobalFree(h)
+            return False
+        return True
 
     def _mark_no_history(self):
         for fmt in self._no_history:
@@ -69,14 +74,15 @@ class Clipboard:
         return items
 
     def restore(self, items):
-        if items is None or not self._open():
-            return
+        """Повернути збережений вміст. Повертає False, якщо щось не вдалося записати."""
+        if items is None or not self._open(1.0):
+            return False
         try:
             w.EmptyClipboard()
-            for fmt, data in items:
-                self._put(fmt, data)
+            ok = all([self._put(fmt, data) for fmt, data in items])
             if items:
                 self._mark_no_history()
+            return ok
         finally:
             w.CloseClipboard()
 
@@ -86,12 +92,15 @@ class Clipboard:
             w.CloseClipboard()
 
     def set_text(self, text):
+        """Записати текст у буфер. Повертає True лише якщо запис вдався."""
         if not self._open():
-            return
+            return False
         try:
-            w.EmptyClipboard()
-            self._put(CF_UNICODETEXT, (text + "\0").encode("utf-16-le"))
+            if not w.EmptyClipboard():
+                return False
+            ok = self._put(CF_UNICODETEXT, (text + "\0").encode("utf-16-le"))
             self._mark_no_history()
+            return ok
         finally:
             w.CloseClipboard()
 
