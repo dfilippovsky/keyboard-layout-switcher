@@ -22,6 +22,7 @@ SEGMENTS = (
 )
 
 APP_ICON_COLOR = (0x25, 0x63, 0xEB)
+FLASH_COLOR = (0x3B, 0x82, 0xF6)  # коротке підсвічування в треї при спрацюванні гарячої клавіші
 
 
 def _dist(px, py, ax, ay, bx, by):

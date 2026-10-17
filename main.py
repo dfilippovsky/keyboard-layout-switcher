@@ -18,6 +18,8 @@ from clipboard import Clipboard
 log = logging.getLogger("kls")
 
 HOTKEY_ID = 1
+FLASH_TIMER_ID = 1
+_FLASH_MS = 350          # скільки іконка в треї світиться синім після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
 ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT = range(100, 105)
 _WS = re.compile(r"\s")
@@ -46,6 +48,8 @@ class App:
         self.settings_root = None
         self.exit_pending = False
         self.hicon = None
+        self.hicon_flash = None
+        self.flashing = False
 
         self.msg_taskbar_created = w.RegisterWindowMessageW("TaskbarCreated")
         self._wndproc = w.WNDPROC(self._wnd_proc)  # тримаємо посилання від GC
@@ -78,7 +82,7 @@ class App:
         if action != w.NIM_DELETE:
             nid.uFlags = w.NIF_MESSAGE | w.NIF_ICON | w.NIF_TIP
             nid.uCallbackMessage = WM_TRAY
-            nid.hIcon = self.hicon
+            nid.hIcon = self.hicon_flash if self.flashing else self.hicon
             nid.szTip = self._tooltip()
             if info:
                 nid.uFlags |= w.NIF_INFO
@@ -88,12 +92,27 @@ class App:
         w.Shell_NotifyIconW(action, ctypes.byref(nid))
 
     def _update_icon(self):
-        old = self.hicon
+        old = (self.hicon, self.hicon_flash)
         size = w.GetSystemMetrics(w.SM_CXSMICON) or 16
         self.hicon = icon.create_hicon(size, icon.tray_color(self.cfg.enabled))
-        if old:
+        self.hicon_flash = icon.create_hicon(size, icon.FLASH_COLOR)
+        if old[0]:
             self._tray(w.NIM_MODIFY)
-            w.DestroyIcon(old)
+            for h in old:
+                w.DestroyIcon(h)
+
+    def flash(self):
+        """Коротко підсвітити іконку в треї синім."""
+        self.flashing = True
+        self._tray(w.NIM_MODIFY)
+        w.SetTimer(self.hwnd, FLASH_TIMER_ID, _FLASH_MS, None)
+        log.debug("tray flash on")
+
+    def _end_flash(self):
+        log.debug("tray flash off")
+        w.KillTimer(self.hwnd, FLASH_TIMER_ID)
+        self.flashing = False
+        self._tray(w.NIM_MODIFY)
 
     def refresh_tray(self):
         self._update_icon()
@@ -226,6 +245,9 @@ class App:
             log.exception("conversion failed")
         finally:
             self.busy = False
+            # Після конвертації: потік одразу повертається до циклу повідомлень,
+            # тож WM_TIMER прийде вчасно й іконка світиться рівно _FLASH_MS.
+            self.flash()
 
     def _convert(self):
         fg = w.GetForegroundWindow()
@@ -404,6 +426,9 @@ class App:
         try:
             if msg == w.WM_HOTKEY and wparam == HOTKEY_ID:
                 self.on_hotkey()
+                return 0
+            if msg == w.WM_TIMER and wparam == FLASH_TIMER_ID:
+                self._end_flash()
                 return 0
             if msg == WM_TRAY:
                 event = lparam & 0xFFFF
