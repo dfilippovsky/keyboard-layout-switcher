@@ -1,6 +1,8 @@
 """Налаштування у config.ini поруч із програмою + автозапуск через реєстр."""
+import codecs
 import configparser
 import os
+import re
 import sys
 import winreg
 from dataclasses import dataclass, asdict
@@ -46,6 +48,18 @@ eye_break_popup_seconds = {eye_break_popup_seconds}
 """
 
 HOTKEY_FIELDS = ("hotkey", "case_hotkey", "translit_hotkey")
+_SECTION_RE = re.compile(r"\[(?P<name>.+)\]$")
+_INLINE_COMMENT_RE = re.compile(r"\s[;#]")
+
+
+def _section_name(line):
+    """Назва секції, якщо рядок — її заголовок (як його бачить configparser
+    з inline_comment_prefixes=(";", "#")), інакше None."""
+    s = line.strip()
+    if not s or s[0] in ";#":
+        return None
+    m = _SECTION_RE.match(_INLINE_COMMENT_RE.split(s, 1)[0].strip())
+    return m.group("name") if m else None
 
 
 @dataclass
@@ -62,13 +76,15 @@ class Config:
     eye_break_popup_seconds: int = 5
 
     @classmethod
-    def load(cls):
+    def load(cls, path=CONFIG_PATH):
+        """Прочитати config.ini. Якщо файлу немає — створити; якщо в ньому бракує
+        ключів (файл від старішої версії) — дописати їх, зберігши наявні значення."""
         cfg = cls()
-        if not os.path.exists(CONFIG_PATH):
-            cfg.save()
+        if not os.path.exists(path):
+            cfg.save(path)
             return cfg
         cp = configparser.ConfigParser(inline_comment_prefixes=(";", "#"))
-        cp.read(CONFIG_PATH, encoding="utf-8-sig")
+        cp.read(path, encoding="utf-8-sig")
         sec = cp["general"] if cp.has_section("general") else {}
         cfg.hotkey = sec.get("hotkey", cfg.hotkey).strip() or cfg.hotkey
         for key in ("case_hotkey", "translit_hotkey"):  # порожнє значення = вимкнено
@@ -84,25 +100,79 @@ class Config:
                 setattr(cfg, key, max(lo, min(hi, cp.getint("general", key, fallback=getattr(cfg, key)))))
             except ValueError:
                 pass
+        missing = [key for key in asdict(cfg) if not cp.has_option("general", key)]
+        if missing:
+            try:
+                _append_missing(path, cfg._values(), missing)
+            except OSError:
+                pass  # не вдалося дописати (лише для читання) — працюємо зі значеннями за замовчуванням
         return cfg
 
-    def save(self):
-        """Атомарний запис: тимчасовий файл + os.replace, тож при збої старий
-        config.ini лишається цілим."""
-        values = {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in asdict(self).items()}
-        tmp = CONFIG_PATH + ".tmp"
+    def _values(self):
+        return {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in asdict(self).items()}
+
+    def save(self, path=CONFIG_PATH):
+        _write_atomic(path, _TEMPLATE.format(**self._values()))
+
+
+def _write_atomic(path, text, newline=None):
+    """Тимчасовий файл + os.replace, тож при збої старий config.ini лишається цілим."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8", newline=newline) as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(_TEMPLATE.format(**values))
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, CONFIG_PATH)
-        except BaseException:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            raise
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _key_blocks(values):
+    """Рядки шаблону для кожного ключа секції [general]: його коментарі + «ключ = значення»."""
+    blocks, comments, in_general = {}, [], False
+    for line in _TEMPLATE.format(**values).splitlines():
+        if line.strip() == "[general]":
+            in_general = True
+        elif in_general and line.startswith(";"):
+            comments.append(line)
+        elif in_general and "=" in line:
+            blocks[line.split("=", 1)[0].strip()] = comments + [line]
+            comments = []
+    return blocks
+
+
+def _append_missing(path, values, missing):
+    """Дописати відсутні ключі (з коментарями з шаблону) в кінець секції [general],
+    не чіпаючи решти файлу: власні коментарі, зайві ключі й інші секції лишаються як є."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    bom = raw.startswith(codecs.BOM_UTF8)
+    text = raw.decode("utf-8-sig")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines(keepends=True)
+    blocks = _key_blocks(values)
+    added = [line + nl for key in missing for line in blocks[key]]
+
+    start = next((i for i, line in enumerate(lines) if _section_name(line) == "general"), None)
+    if start is None:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += nl
+        lines += ([nl] if lines else []) + ["[general]" + nl] + added
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if _section_name(lines[i]) is not None),
+                   len(lines))
+        pos = end
+        while pos > start + 1 and not lines[pos - 1].strip():
+            pos -= 1  # після останнього непорожнього рядка секції, перед порожніми
+        if not lines[pos - 1].endswith(("\n", "\r")):
+            lines[pos - 1] += nl
+        lines[pos:pos] = added
+    _write_atomic(path, ("﻿" if bom else "") + "".join(lines), newline="")
 
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
