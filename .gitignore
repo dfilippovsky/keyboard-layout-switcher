@@ -6,3 +6,4 @@ dist/
 config.ini
 layout_switcher.log
 config.ini.tmp
+autocorrect_exceptions.txt

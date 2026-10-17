@@ -9,6 +9,7 @@ import re
 import sys
 import time
 
+import autocorrect
 import config
 import eyecare
 import hotkey as hk
@@ -36,7 +37,9 @@ _SWALLOW_ID = 50       # тимчасові «голі» клавіші під �
 _HOLD_TIMEOUT = 10.0   # с без натискань — завершити утримання
 _FLASH_MS = 350          # скільки іконка в треї світиться кольором дії після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
-ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES = range(100, 106)
+ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT = range(100, 107)
+EXCEPTIONS_PATH = os.path.join(config.app_dir(), "autocorrect_exceptions.txt")
+_RAW_KEYBOARD, _RAW_MOUSE = 0x06, 0x02   # Generic Desktop: клавіатура, миша
 _WS = re.compile(r"\s")
 _MAX_WORD_STEPS = 8      # скільки разів Ctrl+Shift+Left шукати початок слова
 _MAX_RESELECT = 5000     # не виділяти назад надто довгий текст
@@ -69,6 +72,11 @@ class App:
         self.case_cycler = textcase.CaseCycler()
         self.eyes = eyecare.EyeBreaks()
         self.eye_icon = None
+        self.tracker = autocorrect.Tracker()
+        self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
+        self.raw = {_RAW_KEYBOARD: False, _RAW_MOUSE: False}  # що зараз зареєстровано в Raw Input
+        self._raw_buf = (ctypes.c_byte * 64)()  # з запасом: RAWINPUT більший за заголовок + дані
+        self._draining = False
 
         self.msg_taskbar_created = w.RegisterWindowMessageW("TaskbarCreated")
         self._wndproc = w.WNDPROC(self._wnd_proc)  # тримаємо посилання від GC
@@ -83,6 +91,7 @@ class App:
         self._update_icon()
         self._tray(w.NIM_ADD)
         self._warn_failed(self._register_hotkeys())
+        self._update_raw_input()
         w.SetTimer(self.hwnd, EYE_TIMER_ID, eyecare.TICK_MS, None)
 
     # ---------- трей ----------
@@ -152,6 +161,8 @@ class App:
                 _HOTKEY_LABELS[action], getattr(self.cfg, field) or "вимкнено"))
         w.AppendMenuW(m, w.MF_SEPARATOR, 0, None)
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.enabled else 0), ID_ENABLED, "Увімкнено")
+        w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.autocorrect else 0), ID_AUTOCORRECT,
+                      "Автовиправлення розкладки під час набору")
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.eye_breaks else 0), ID_EYES,
                       "Нагадування 20-20-20 для очей")
         w.AppendMenuW(m, w.MF_STRING, ID_SETTINGS, "Налаштування…")
@@ -172,6 +183,11 @@ class App:
             self.cfg.enabled = not self.cfg.enabled
             self.cfg.save()
             self.refresh_tray()
+            self._update_raw_input()
+        elif cmd == ID_AUTOCORRECT:
+            self.cfg.autocorrect = not self.cfg.autocorrect
+            self.cfg.save()
+            self._update_raw_input()
         elif cmd == ID_EYES:
             self.cfg.eye_breaks = not self.cfg.eye_breaks
             self.cfg.save()
@@ -222,6 +238,9 @@ class App:
                 failed.append(text)
                 if action == HOTKEY_LAYOUT:
                     self.hotkey_ok = False
+        # Натискання гарячої клавіші розкладки не скасовує можливість скасувати автовиправлення
+        mods, vk = self.registered.get(HOTKEY_LAYOUT, (0, 0))
+        self.tracker.ignore_vks = set(hk.register_vks(mods, vk)) if vk else set()
         self.refresh_tray()
         return failed
 
@@ -232,7 +251,9 @@ class App:
 
     def reload_config(self):
         self.cfg = config.Config.load()
+        self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
         self._warn_failed(self._register_hotkeys())
+        self._update_raw_input()
 
     # ---------- налаштування ----------
 
@@ -281,6 +302,7 @@ class App:
             return "Не вдалося зберегти %s: %s" % (config.CONFIG_PATH, e)
         self.eyes.reset()
         self.refresh_tray()
+        self._update_raw_input()
         return None
 
     def _check_hotkeys(self, values):
@@ -322,13 +344,24 @@ class App:
         fg = w.GetForegroundWindow()
         if not fg or fg == self.hwnd:
             return
+        # Текст зараз зміниться — набране до цього вже не відповідає полю
+        correction, correction_fg = self.tracker.correction, self.tracker.fg
+        self.tracker.reset()
         self.busy = True
         try:
-            self._run_action(action, fg)
+            if action == HOTKEY_LAYOUT and correction and fg == correction_fg:
+                self._undo_autocorrect(correction, fg)
+            else:
+                self._run_action(action, fg)
         except Exception:
             log.exception("hotkey action %d failed", action)
         finally:
             self.busy = False
+            # Події модифікаторів під час дії міг забрати PhysicalKeys.poll(), а свої
+            # натискання ми не враховуємо — беремо стан, у якому їх лишила дія
+            self.tracker.sync_mods(vk for vk in kio.SIDED_MODIFIER_VKS if kio.is_down(vk))
+            self.tracker.caps = None  # і Caps Lock звіримо заново перед наступним словом
+            self._update_raw_mouse()
             # Після обробки: потік одразу повертається до циклу повідомлень,
             # тож WM_TIMER прийде вчасно й іконка світиться рівно _FLASH_MS.
             self.flash(action)
@@ -343,7 +376,7 @@ class App:
         keys = None
         if groups:
             try:
-                keys = kio.PhysicalKeys(self.hwnd)
+                keys = kio.PhysicalKeys(self.hwnd, keep=self.raw[_RAW_KEYBOARD])
             except OSError:
                 log.exception("raw input is unavailable")
         try:
@@ -630,6 +663,152 @@ class App:
         kio.type_text(conv + suffix)
         return True
 
+    # ---------- автовиправлення розкладки ----------
+
+    def _set_raw(self, usage, on):
+        if self.raw[usage] == on:
+            return
+        dev = w.RAWINPUTDEVICE(0x01, usage, w.RIDEV_INPUTSINK if on else w.RIDEV_REMOVE,
+                               self.hwnd if on else None)
+        if w.RegisterRawInputDevices(ctypes.byref(dev), 1, ctypes.sizeof(dev)):
+            self.raw[usage] = on
+        else:
+            log.warning("RegisterRawInputDevices(%#x, %s) failed: %d", usage, on, ctypes.get_last_error())
+
+    def _update_raw_input(self):
+        """Стежити за клавіатурою, лише поки автовиправлення увімкнене."""
+        on = self.cfg.enabled and self.cfg.autocorrect
+        if on != self.raw[_RAW_KEYBOARD]:
+            self.tracker.reset()
+            self.tracker.caps = None  # поки не стежили, Caps Lock могли перемкнути
+        if on:  # мовні дані — заздалегідь, щоб перше виправлення не барилося
+            for hkl in layouts.installed():
+                autocorrect.model(autocorrect.lang_of(hkl))
+        self._set_raw(_RAW_KEYBOARD, on)
+        self._update_raw_mouse()
+
+    def _update_raw_mouse(self):
+        """Клік мишею може перенести курсор, тож поки є набране слово (або виправлення,
+        яке можна скасувати), стежимо й за кнопками миші. Решту часу — ні: рух миші
+        дає сотні подій за секунду."""
+        self._set_raw(_RAW_MOUSE, self.raw[_RAW_KEYBOARD] and self.tracker.active)
+
+    def _on_raw_input(self, lparam):
+        """Обробити WM_INPUT. Повертає True, якщо це дія користувача, після якої
+        передруковувати вже не можна (натиснуто клавішу або кнопку миші)."""
+        buf = self._raw_buf
+        size = ctypes.c_uint(ctypes.sizeof(buf))
+        got = w.GetRawInputData(lparam, w.RID_INPUT, buf, ctypes.byref(size),
+                                ctypes.sizeof(w.RAWINPUTHEADER))
+        if got in (0, 0xFFFFFFFF):
+            return False
+        header = w.RAWINPUTHEADER.from_buffer(buf)
+        if header.dwType == w.RIM_TYPEMOUSE:
+            buttons = w.RAWINPUT_MOUSE.from_buffer(buf).mouse.ulButtons & 0xFFFF
+            if not buttons & w.RI_MOUSE_BUTTONS_DOWN:
+                return False
+            self.tracker.mouse_click()
+            self._update_raw_mouse()
+            return True
+        if header.dwType != w.RIM_TYPEKEYBOARD:
+            return False
+        kb = w.RAWINPUT_KEYBOARD.from_buffer(buf).keyboard
+        vk = kio.sided(kb.VKey, kb.MakeCode, kb.Flags)
+        down = not kb.Flags & w.RI_KEY_BREAK
+        injected = not header.hDevice
+        own = injected and kb.ExtraInformation == kio.OWN_INPUT
+        fg = hkl = None
+        if down and not injected:
+            fg = w.GetForegroundWindow()
+            hkl = layouts.current(w.GetWindowThreadProcessId(fg, None))
+            self._sync_caps(vk)
+        words = self.tracker.key(vk, down, injected, fg, hkl, own)
+        if words is not None:
+            self._on_word(words, fg, hkl)
+        self._update_raw_mouse()
+        return down and not injected and vk not in kio.SIDED_MODIFIER_VKS
+
+    def _sync_caps(self, vk):
+        """Перемикання Caps Lock трекер рахує сам; вихідний стан (на старті й після
+        гарячих клавіш він невідомий) беремо перед першою літерою."""
+        if vk in layouts.TYPING_VKS and self.tracker.caps is None:
+            self.tracker.caps = kio.caps_on()
+
+    def _on_word(self, words, fg, hkl):
+        """Після пробілу: виправити слово (і короткі слова перед ним), якщо треба."""
+        correction = None
+        if not self._draining:
+            try:
+                correction = self._pick_correction(words, fg, hkl)
+            except Exception:
+                log.exception("autocorrect failed")
+        self.tracker.finished(words, correction is not None)
+        if correction is None:
+            return
+        # Поки ми думали, користувач міг друкувати далі: тоді передрук зіпсував би текст
+        if self._drain_input():
+            log.debug("autocorrect skipped: input continued")
+            return
+        if self.tracker.mods - {0xA0, 0xA1}:
+            log.debug("autocorrect skipped: modifiers held")  # Ctrl+Backspace стер би слово
+            self.tracker.reset()
+            return
+        if not kio.retype(len(correction.typed) + 1, correction.fixed + " "):
+            log.warning("autocorrect: SendInput failed")
+            self.tracker.reset()
+            return
+        # Лише тепер його можна скасовувати: воно справді надруковане
+        self.tracker.correction = correction
+        log.debug("autocorrect: %d chars, layout %#x -> %#x", len(correction.typed),
+                  correction.src & 0xFFFFFFFF, correction.dst & 0xFFFFFFFF)
+        if self.cfg.switch_layout:
+            layouts.switch(fg, correction.dst)
+        self.flash(HOTKEY_LAYOUT)
+
+    def _pick_correction(self, words, fg, hkl):
+        if self.busy or not fg or not hkl:
+            return None
+        pid = ctypes.c_ulong()
+        w.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+        if pid.value == os.getpid():
+            return None  # наші власні вікна (налаштування)
+        excluded = self.cfg.excluded_apps()
+        if excluded and w.process_name(fg).lower() in excluded:
+            return None
+        if eyecare.fullscreen_app():
+            return None  # ігри: WASD + пробіл — не текст
+        return autocorrect.choose(words, hkl, layouts.installed(), self.ac_exceptions)
+
+    def _drain_input(self):
+        """Обробити WM_INPUT, що вже чекають у черзі. True — серед них є дії користувача."""
+        msg = w.MSG()
+        activity = False
+        self._draining = True
+        try:
+            while w.PeekMessageW(ctypes.byref(msg), self.hwnd, w.WM_INPUT, w.WM_INPUT, w.PM_REMOVE):
+                activity |= self._on_raw_input(msg.lParam)
+                w.DefWindowProcW(self.hwnd, w.WM_INPUT, msg.wParam, msg.lParam)
+        finally:
+            self._draining = False
+        return activity
+
+    def _undo_autocorrect(self, correction, fg):
+        """Гаряча клавіша розкладки одразу після автовиправлення — повернути як було
+        і запам'ятати слово, щоб більше його не чіпати."""
+        kio.neutralize_alt_win()
+        if not kio.wait_modifiers_released(3.0):
+            return
+        if not kio.retype(len(correction.fixed) + 1, correction.typed + " "):
+            return
+        if self.cfg.switch_layout:
+            layouts.switch(fg, correction.src)
+        if correction.word and correction.word not in self.ac_exceptions:
+            self.ac_exceptions.add(correction.word)
+            try:
+                autocorrect.add_exception(EXCEPTIONS_PATH, correction.word)
+            except OSError:
+                log.exception("cannot save autocorrect exception")
+
     # ---------- нагадування 20-20-20 ----------
 
     def _eye_tick(self):
@@ -656,7 +835,9 @@ class App:
 
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         try:
-            if msg == w.WM_HOTKEY and wparam % _HOTKEY_ALIAS in _HOTKEY_FIELDS:
+            if msg == w.WM_INPUT:
+                self._on_raw_input(lparam)  # далі DefWindowProc — так вимагає Raw Input
+            elif msg == w.WM_HOTKEY and wparam % _HOTKEY_ALIAS in _HOTKEY_FIELDS:
                 self.on_hotkey(wparam % _HOTKEY_ALIAS)
                 return 0
             if msg == w.WM_TIMER and wparam == FLASH_TIMER_ID:

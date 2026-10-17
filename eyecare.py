@@ -13,6 +13,7 @@ import winapi as w
 TICK_MS = 60_000                 # як часто перевіряти
 _IDLE_RESET = 5 * 60             # стільки без введення = перерва вже була
 _QUNS_ACCEPTS_NOTIFICATIONS = 5
+_QUNS_FULLSCREEN = (2, 3, 4)     # BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE
 _CONSENT = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
 
 
@@ -29,6 +30,14 @@ def notifications_blocked():
     if w.SHQueryUserNotificationState(ctypes.byref(state)) != 0:
         return False
     return state.value != _QUNS_ACCEPTS_NOTIFICATIONS
+
+
+def fullscreen_app():
+    """Повноекранна програма (гра, відео), Direct3D на весь екран або презентація."""
+    state = ctypes.c_int()
+    if w.SHQueryUserNotificationState(ctypes.byref(state)) != 0:
+        return False
+    return state.value in _QUNS_FULLSCREEN
 
 
 def _key_in_use(key, depth):

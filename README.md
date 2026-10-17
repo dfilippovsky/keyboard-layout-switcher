@@ -20,6 +20,35 @@ Works with any installed layouts (EN/UK/DE/PL/…): character tables are built f
 system layouts, nothing is hard-coded. The target is the next layout in the Windows list
 after the one the text was typed in.
 
+### Auto-correct while typing
+
+Like Punto Switcher: you don't even need the hotkey. Type `ghbdsn`, press `Space`, and the
+word becomes `привіт ` and the window switches to the Ukrainian layout. It works the other
+way too (`руддщ` → `hello`).
+
+- **How a word is recognised.** The app keeps the keys of the current word. When you press
+  `Space`, it compares how the word looks in the current layout and in the others. The word
+  is retyped only if two things hold: what you typed is not a word, and in another layout it
+  becomes one. A word counts if it is in the dictionary (the 30 000 most frequent words) or
+  its letter trigrams look like that language. Case and punctuation are kept:
+  `Ghbdsn` → `Привіт`, `lj,ht?` → `добре,`.
+- **Short words** (`z`, `nf`, `yt`) are too ambiguous on their own (`plan b`), so they are
+  fixed only together with the next word that gets fixed: `nf yt ghbqle` → `та не прийду`.
+- **Undo:** press the layout hotkey (`Pause`) right after a correction. The text and layout
+  go back, and the word is added to `autocorrect_exceptions.txt` next to the app, so it is
+  never touched again. You can edit that file by hand: one word per line.
+- **When it stays out of the way:** after arrows, `Home`/`End`, `Enter`, `Tab`, a mouse
+  click, a shortcut (`Ctrl+…`), switching windows or layouts, or text inserted by other
+  programs, it does nothing until the next word. It also skips fullscreen apps and games,
+  the app's own windows, and programs listed in `autocorrect_exclude`.
+- **Languages:** English and Ukrainian (data in `langdata/`). Layouts of other languages
+  are left alone.
+- **Privacy:** keystrokes are read through Raw Input, without keyboard hooks. Only the
+  current word and a few short words before it are kept in memory, and the text is never
+  written anywhere, the debug log included.
+
+Turn it on or off in the tray menu or the settings (`autocorrect`).
+
 ### More tools
 
 Each of these has its own hotkey and works on the selection or the last word, just like
@@ -70,15 +99,16 @@ Or build the exe (see below) and run `KeyboardLayoutSwitcher.exe`.
 ## Tray
 
 - **Double-click** — settings window.
-- **Right-click** — menu: current hotkeys, Enabled, 20-20-20 eye breaks, Settings…,
-  Open config.ini, Reload config.ini, Exit.
+- **Right-click** — menu: current hotkeys, Enabled, Auto-correct layout while typing,
+  20-20-20 eye breaks, Settings…, Open config.ini, Reload config.ini, Exit.
 
 ## Settings
 
 The settings window has: three hotkeys (click a field and press the combination;
 `Backspace` clears the case/transliteration hotkey and turns the action off),
-enable/disable, layout switching, reselecting converted text, **start with Windows**,
-the copy timeout, and eye break reminders with their interval.
+enable/disable, layout switching, reselecting converted text, auto-correct while typing
+and the programs where it is off, **start with Windows**, the copy timeout, and eye break
+reminders with their interval.
 
 Everything is stored in `config.ini` next to `main.py` / the exe (created on first run):
 
@@ -87,8 +117,10 @@ Everything is stored in `config.ini` next to `main.py` / the exe (created on fir
 | `hotkey`          | `Pause`  | Layout conversion. Combination: `Ctrl`/`Alt`/`Shift`/`Win` + key. Examples: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
 | `case_hotkey`     | `Alt+Pause` | Case change. Empty — off. |
 | `translit_hotkey` | `Ctrl+Pause` | Transliteration. Empty — off. |
-| `enabled`         | `true`   | React to the hotkeys. |
-| `switch_layout`   | `true`   | Switch the active window's layout after converting. |
+| `enabled`         | `true`   | React to the hotkeys and auto-correct (master switch). |
+| `switch_layout`   | `true`   | Switch the active window's layout after converting (and after auto-correct). |
+| `autocorrect`     | `true`   | Auto-correct words typed in the wrong layout after `Space`. |
+| `autocorrect_exclude` | *(empty)* | Programs where auto-correct is off: exe names separated by commas, e.g. `WindowsTerminal.exe, code.exe`. |
 | `reselect`        | `true`   | Select the converted text again after converting a selection (skipped for text longer than 5000 characters). |
 | `copy_timeout_ms` | `250`    | How long to wait for the app to put text on the clipboard after `Ctrl+C`. Increase for slow apps. |
 | `eye_breaks`      | `true`   | 20-20-20 eye break reminders. |
@@ -128,8 +160,15 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 .\build.ps1 -OneDir   # dist\KeyboardLayoutSwitcher\ — folder: faster start, one process
 ```
 
-The script uses `.venv` if present, installs PyInstaller from `requirements-dev.txt`
-and generates `app.ico` from the same icon.
+The script uses `.venv` if present, installs PyInstaller from `requirements-dev.txt`,
+generates `app.ico` from the same icon and bundles `langdata\` into the exe.
+
+The language data for auto-correct (`langdata\*.txt.gz`) is generated by
+`python tools\build_langdata.py [en uk …]` from the
+[FrequencyWords](https://github.com/hermitdave/FrequencyWords) lists (© Hermit Dave,
+data under CC BY-SA 4.0, built from OpenSubtitles). To add a language, add its alphabet to
+`ALPHABETS` in the script and its script (Latin/Cyrillic/…) to `_SCRIPTS` in
+`autocorrect.py`.
 
 ### Single file or folder
 
@@ -156,9 +195,12 @@ For an app that sits in the tray all the time and starts with Windows, `-OneDir`
 better (less RAM, faster start). Use the single file when easy sharing matters more.
 
 Resources: ~25 MB RAM in the background (onefile additionally keeps a ~10 MB bootloader
-process), 0% CPU — no keyboard hooks or polling, just `RegisterHotKey` (plus Raw Input
-only while a hotkey modifier is held, and one timer check per minute for eye breaks). Tk
-is loaded only when the settings window is opened for the first time.
+process), plus ~10 MB for the language data when auto-correct is on. CPU use is next to
+zero: there are no keyboard hooks or polling, just `RegisterHotKey` and one timer check per
+minute for eye breaks. Raw Input is used in two cases. Keyboard events are read only while
+auto-correct is on, or while a hotkey modifier is held. Mouse buttons are watched only while
+a word is being typed, since a click may move the caret. Tk is loaded only when the settings
+window is opened for the first time.
 
 ## How it works
 
@@ -194,6 +236,11 @@ plays and the reason is logged) if:
   (Windows UIPI restriction).
 - Intermediate text copied via `Ctrl+C` may end up in the clipboard history (Win+V).
 - Consoles/terminals with non-standard `Ctrl+C`/`Ctrl+Shift+Left` are not supported.
+- Auto-correct retypes the word with `Backspace` and has to trust that the text before the
+  caret is what was typed. In fields with inline autocomplete (a browser address bar) or
+  where `Space` accepts a suggestion, add the program to `autocorrect_exclude`. Keys sent by
+  remapping tools (e.g. PowerToys Keyboard Manager) count as inserted text, so words typed
+  through them are not corrected. Characters typed with dead keys are not handled either.
 
 ---
 
@@ -218,6 +265,36 @@ plays and the reason is logged) if:
 Працює з будь-якими встановленими розкладками (EN/UK/DE/PL/…): таблиці символів
 будуються з системних розкладок, нічого не зашито. Напрям — наступна розкладка
 в списку Windows після тієї, в якій набрано текст.
+
+### Автовиправлення під час набору
+
+Як у Punto Switcher, і гаряча клавіша навіть не потрібна. Набираєте `ghbdsn`, тиснете
+`Пробіл`, і слово стає `привіт `, а розкладка вікна перемикається на українську. Працює й
+навпаки (`руддщ` → `hello`).
+
+- **Як розпізнається слово.** Програма запам'ятовує клавіші поточного слова. Після
+  пробілу вона порівнює, як воно виглядає в поточній розкладці та в інших. Передрук буде,
+  лише якщо виконуються обидві умови: набране не є словом, а в іншій розкладці виходить
+  слово. Словом вважається те, що є в словнику (30 000 найчастіших слів) або чиї трибуквені
+  сполучення схожі на цю мову. Регістр і розділові знаки зберігаються:
+  `Ghbdsn` → `Привіт`, `lj,ht?` → `добре,`.
+- **Короткі слова** (`z`, `nf`, `yt`) самі по собі надто неоднозначні (`plan b`), тому
+  виправляються лише разом із наступним словом, яке теж виправилося:
+  `nf yt ghbqle` → `та не прийду`.
+- **Скасувати:** одразу після виправлення натисніть гарячу клавішу розкладки (`Pause`).
+  Текст і розкладка повернуться, а слово запишеться в `autocorrect_exceptions.txt` поруч
+  із програмою, і більше його не чіпатимуть. Файл можна редагувати вручну: одне слово в рядку.
+- **Коли не втручається:** після стрілок, `Home`/`End`, `Enter`, `Tab`, кліку мишею,
+  комбінацій (`Ctrl+…`), перемикання вікна чи розкладки, а також тексту, вставленого
+  іншими програмами, — до наступного слова нічого не робить. Не працює в повноекранних
+  програмах та іграх, у вікнах самої програми і в програмах з `autocorrect_exclude`.
+- **Мови:** англійська й українська (дані в `langdata/`). Розкладки інших мов
+  автовиправлення не чіпає.
+- **Приватність:** натискання читаються через Raw Input, без хуків клавіатури. У пам'яті
+  тримаються лише поточне слово й кілька коротких перед ним. Текст ніде не записується,
+  навіть у детальний лог.
+
+Вмикається й вимикається в меню трею або в налаштуваннях (`autocorrect`).
 
 ### Інші інструменти
 
@@ -271,15 +348,17 @@ plays and the reason is logged) if:
 ## Трей
 
 - **Подвійний клік** — вікно налаштувань.
-- **Правий клік** — меню: поточні гарячі клавіші, Увімкнено, Нагадування 20-20-20,
-  Налаштування…, Відкрити config.ini, Перечитати config.ini, Вихід.
+- **Правий клік** — меню: поточні гарячі клавіші, Увімкнено, Автовиправлення розкладки
+  під час набору, Нагадування 20-20-20, Налаштування…, Відкрити config.ini,
+  Перечитати config.ini, Вихід.
 
 ## Налаштування
 
 Вікно налаштувань: три гарячі клавіші (клацніть у поле й натисніть комбінацію;
 `Backspace` очищує клавішу регістру/транслітерації й вимикає дію),
-увімкнення, перемикання розкладки, повторне виділення, **запуск разом з Windows**,
-затримка очікування копіювання, нагадування для очей та їхній інтервал.
+увімкнення, перемикання розкладки, повторне виділення, автовиправлення під час набору
+і програми, де воно вимкнене, **запуск разом з Windows**, затримка очікування копіювання,
+нагадування для очей та їхній інтервал.
 
 Усе зберігається в `config.ini` поруч із `main.py` / exe (створюється при першому запуску):
 
@@ -288,8 +367,10 @@ plays and the reason is logged) if:
 | `hotkey`          | `Pause`          | Конвертація розкладки. Комбінація: `Ctrl`/`Alt`/`Shift`/`Win` + клавіша. Приклади: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
 | `case_hotkey`     | `Alt+Pause`      | Зміна регістру. Порожньо — вимкнено. |
 | `translit_hotkey` | `Ctrl+Pause`     | Транслітерація. Порожньо — вимкнено. |
-| `enabled`         | `true`           | Реагувати на гарячі клавіші. |
-| `switch_layout`   | `true`           | Після конвертації перемикати розкладку активного вікна. |
+| `enabled`         | `true`           | Реагувати на гарячі клавіші й автовиправлення (загальний вимикач). |
+| `switch_layout`   | `true`           | Після конвертації (і автовиправлення) перемикати розкладку активного вікна. |
+| `autocorrect`     | `true`           | Автовиправлення слів, набраних не в тій розкладці, після `Пробілу`. |
+| `autocorrect_exclude` | *(порожньо)* | Програми, де автовиправлення вимкнене: імена exe через кому, напр. `WindowsTerminal.exe, code.exe`. |
 | `reselect`        | `true`           | Після конвертації виділеного тексту виділяти його знову (для тексту довшого за 5000 символів пропускається). |
 | `copy_timeout_ms` | `250`            | Скільки чекати, поки програма віддасть текст на `Ctrl+C`. Збільште для повільних програм. |
 | `eye_breaks`      | `true`           | Нагадування 20-20-20 для очей. |
@@ -329,8 +410,14 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 .\build.ps1 -OneDir   # dist\KeyboardLayoutSwitcher\ — папка: швидший старт, один процес
 ```
 
-Скрипт використовує `.venv`, якщо він є, ставить PyInstaller з `requirements-dev.txt`
-і генерує `app.ico` з тієї ж іконки.
+Скрипт використовує `.venv`, якщо він є, ставить PyInstaller з `requirements-dev.txt`,
+генерує `app.ico` з тієї ж іконки і вкладає `langdata\` в exe.
+
+Мовні дані автовиправлення (`langdata\*.txt.gz`) генерує
+`python tools\build_langdata.py [en uk …]` з частотних словників
+[FrequencyWords](https://github.com/hermitdave/FrequencyWords) (© Hermit Dave, дані під
+CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, допишіть її алфавіт в `ALPHABETS`
+у скрипті, а письмо (латиниця/кирилиця/…) — в `_SCRIPTS` в `autocorrect.py`.
 
 ### Один файл чи папка
 
@@ -356,10 +443,13 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 Для програми, що постійно висить у треї й стартує з Windows, трохи вигідніший `-OneDir`
 (менше RAM, швидший старт). Один файл — коли важливіше, щоб його було легко передати.
 
-Ресурси: у фоні ~25 MB RAM (onefile додатково тримає процес-завантажувач ~10 MB),
-0% CPU — жодних хуків клавіатури чи опитування, лише `RegisterHotKey` (плюс Raw Input
-тільки поки утримується модифікатор гарячої клавіші й одна перевірка таймера на хвилину для
-перерв). Tk підвантажується тільки при першому відкритті налаштувань.
+Ресурси: у фоні ~25 MB RAM (onefile додатково тримає процес-завантажувач ~10 MB), плюс
+~10 MB на мовні дані, коли автовиправлення увімкнене. Процесор майже не навантажується:
+жодних хуків клавіатури чи опитування, лише `RegisterHotKey` й одна перевірка таймера на
+хвилину для перерв. Raw Input задіяний у двох випадках. Події клавіатури читаються лише
+поки увімкнене автовиправлення або утримується модифікатор гарячої клавіші. Кнопки миші
+відстежуються тільки поки набирається слово, бо клік може зсунути курсор.
+Tk підвантажується тільки при першому відкритті налаштувань.
 
 ## Як це працює
 
@@ -395,3 +485,9 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
   цих прав (обмеження Windows UIPI).
 - Проміжний текст, скопійований через `Ctrl+C`, може потрапити в журнал буфера (Win+V).
 - Консолі/термінали з нестандартними `Ctrl+C`/`Ctrl+Shift+Left` не підтримуються.
+- Автовиправлення передруковує слово через `Backspace` і мусить покладатися на те, що
+  перед курсором саме набраний текст. У полях з автодоповненням у рядку (адресний рядок
+  браузера) чи там, де `Пробіл` приймає підказку, додайте програму в `autocorrect_exclude`.
+  Натискання від програм перепризначення клавіш (наприклад, PowerToys Keyboard Manager)
+  вважаються вставленим текстом, тож набрані через них слова не виправляються. Не
+  враховуються й символи, набрані через «мертві» клавіші.
