@@ -147,11 +147,32 @@ GlobalUnlock = _f(kernel32, "GlobalUnlock", W.BOOL, W.HGLOBAL)
 GlobalSize = _f(kernel32, "GlobalSize", ctypes.c_size_t, W.HGLOBAL)
 GlobalFree = _f(kernel32, "GlobalFree", W.HGLOBAL, W.HGLOBAL)
 GetModuleHandleW = _f(kernel32, "GetModuleHandleW", W.HMODULE, W.LPCWSTR)
+OpenProcess = _f(kernel32, "OpenProcess", W.HANDLE, W.DWORD, W.BOOL, W.DWORD)
+CloseHandle = _f(kernel32, "CloseHandle", W.BOOL, W.HANDLE)
+QueryFullProcessImageNameW = _f(kernel32, "QueryFullProcessImageNameW", W.BOOL, W.HANDLE, W.DWORD,
+                                W.LPWSTR, ctypes.POINTER(W.DWORD))
 CreateMutexW = _f(kernel32, "CreateMutexW", W.HANDLE, W.LPVOID, W.BOOL, W.LPCWSTR)
 LCIDToLocaleName = _f(kernel32, "LCIDToLocaleName", ctypes.c_int, W.DWORD, W.LPWSTR, ctypes.c_int, W.DWORD)
 
 # shell32
 Shell_NotifyIconW = _f(shell32, "Shell_NotifyIconW", W.BOOL, W.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
+
+
+def process_exe(hwnd):
+    """Ім'я exe процесу, якому належить вікно (у нижньому регістрі), або ''."""
+    pid = W.DWORD()
+    GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = W.DWORD(len(buf))
+        if not QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            return ""
+        return buf.value.rsplit("\\", 1)[-1].lower()
+    finally:
+        CloseHandle(h)
 
 
 def sleep_pumping(seconds):
