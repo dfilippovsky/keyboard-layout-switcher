@@ -41,12 +41,14 @@ TPM_RIGHTBUTTON, TPM_NONOTIFY, TPM_RETURNCMD = 0x0002, 0x0080, 0x0100
 # Raw Input
 RIDEV_REMOVE, RIDEV_INPUTSINK = 0x0001, 0x0100
 RID_INPUT = 0x10000003
-RIM_TYPEKEYBOARD = 1
+RIM_TYPEMOUSE, RIM_TYPEKEYBOARD = 0, 1
+RI_MOUSE_BUTTONS_DOWN = 0x0001 | 0x0004 | 0x0010 | 0x0040 | 0x0100  # ліва, права, середня, 4, 5
 RI_KEY_BREAK, RI_KEY_E0 = 0x01, 0x02
 
 SM_CXICON = 11
 SM_CXSMICON = 49
 ERROR_ALREADY_EXISTS = 183
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 
 class WNDCLASSEXW(ctypes.Structure):
@@ -113,6 +115,16 @@ class RAWINPUT_KEYBOARD(ctypes.Structure):
     _fields_ = [("header", RAWINPUTHEADER), ("keyboard", RAWKEYBOARD)]
 
 
+class RAWMOUSE(ctypes.Structure):
+    # ulButtons — об'єднання з usButtonFlags (молодше слово) і usButtonData
+    _fields_ = [("usFlags", W.USHORT), ("ulButtons", W.ULONG), ("ulRawButtons", W.ULONG),
+                ("lLastX", W.LONG), ("lLastY", W.LONG), ("ulExtraInformation", W.ULONG)]
+
+
+class RAWINPUT_MOUSE(ctypes.Structure):
+    _fields_ = [("header", RAWINPUTHEADER), ("mouse", RAWMOUSE)]
+
+
 def _f(dll, name, restype, *argtypes):
     fn = getattr(dll, name)
     fn.restype = restype
@@ -164,6 +176,7 @@ ToUnicodeEx = _f(user32, "ToUnicodeEx", ctypes.c_int, W.UINT, W.UINT, ctypes.POI
 MapVirtualKeyExW = _f(user32, "MapVirtualKeyExW", W.UINT, W.UINT, W.UINT, W.HKL)
 SendInput = _f(user32, "SendInput", W.UINT, W.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
 GetAsyncKeyState = _f(user32, "GetAsyncKeyState", W.SHORT, ctypes.c_int)
+GetKeyState = _f(user32, "GetKeyState", W.SHORT, ctypes.c_int)
 GetLastInputInfo = _f(user32, "GetLastInputInfo", W.BOOL, ctypes.POINTER(LASTINPUTINFO))
 RegisterRawInputDevices = _f(user32, "RegisterRawInputDevices", W.BOOL, ctypes.POINTER(RAWINPUTDEVICE),
                              W.UINT, W.UINT)
@@ -196,11 +209,32 @@ GetModuleHandleW = _f(kernel32, "GetModuleHandleW", W.HMODULE, W.LPCWSTR)
 CreateMutexW = _f(kernel32, "CreateMutexW", W.HANDLE, W.LPVOID, W.BOOL, W.LPCWSTR)
 LCIDToLocaleName = _f(kernel32, "LCIDToLocaleName", ctypes.c_int, W.DWORD, W.LPWSTR, ctypes.c_int, W.DWORD)
 GetTickCount = _f(kernel32, "GetTickCount", W.DWORD)
+OpenProcess = _f(kernel32, "OpenProcess", W.HANDLE, W.DWORD, W.BOOL, W.DWORD)
+CloseHandle = _f(kernel32, "CloseHandle", W.BOOL, W.HANDLE)
+QueryFullProcessImageNameW = _f(kernel32, "QueryFullProcessImageNameW", W.BOOL, W.HANDLE, W.DWORD,
+                                W.LPWSTR, ctypes.POINTER(W.DWORD))
 
 # shell32
 Shell_NotifyIconW = _f(shell32, "Shell_NotifyIconW", W.BOOL, W.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
 SHQueryUserNotificationState = _f(shell32, "SHQueryUserNotificationState", ctypes.c_long,
                                   ctypes.POINTER(ctypes.c_int))
+
+
+def process_name(hwnd):
+    """Ім'я exe процесу вікна (напр. «code.exe») або "", якщо його не видно."""
+    pid = W.DWORD()
+    GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not handle:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = W.DWORD(len(buf))
+        if not QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return ""
+        return buf.value.rsplit("\\", 1)[-1]
+    finally:
+        CloseHandle(handle)
 
 
 def sleep_pumping(seconds):

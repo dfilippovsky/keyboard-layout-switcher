@@ -39,7 +39,8 @@ Restore-Config
 if (Test-Path $cfg) { Copy-Item $cfg $cfgBackup -Force }
 try {
     & $py -m PyInstaller --noconfirm --clean $mode --windowed `
-        --name KeyboardLayoutSwitcher --icon build\app.ico @excludeArgs main.py
+        --name KeyboardLayoutSwitcher --icon build\app.ico --add-data "langdata;langdata" `
+        @excludeArgs main.py
     $code = $LASTEXITCODE
 } finally {
     Restore-Config

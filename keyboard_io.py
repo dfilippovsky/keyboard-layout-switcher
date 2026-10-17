@@ -14,6 +14,7 @@ VK_RETURN = 0x0D
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
+VK_CAPITAL = 0x14
 VK_LEFT = 0x25
 VK_RIGHT = 0x27
 VK_LWIN = 0x5B
@@ -36,11 +37,12 @@ _KEYEVENTF_EXTENDEDKEY = 0x0001
 _KEYEVENTF_KEYUP = 0x0002
 _KEYEVENTF_UNICODE = 0x0004
 _CHUNK = 200
+OWN_INPUT = 0x4B4C5357  # dwExtraInfo наших подій («KLSW») — Raw Input повертає його в ExtraInformation
 
 
 def _input(vk=0, scan=0, flags=0):
     inp = w.INPUT(type=_INPUT_KEYBOARD)
-    inp.u.ki = w.KEYBDINPUT(vk, scan, flags, 0, 0)
+    inp.u.ki = w.KEYBDINPUT(vk, scan, flags, 0, OWN_INPUT)
     return inp
 
 
@@ -92,8 +94,7 @@ def select_word_left_and_copy():
     copy()
 
 
-def type_text(text):
-    """Надрукувати текст юнікод-подіями (не залежить від поточної розкладки)."""
+def _text_inputs(text):
     seq = []
     for ch in text.replace("\r\n", "\n"):
         if ch == "\n":
@@ -103,7 +104,20 @@ def type_text(text):
         for unit in struct.unpack("<%dH" % (len(data) // 2), data):
             seq.append(_input(0, unit, _KEYEVENTF_UNICODE))
             seq.append(_input(0, unit, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP))
-    _send(seq)
+    return seq
+
+
+def type_text(text):
+    """Надрукувати текст юнікод-подіями (не залежить від поточної розкладки)."""
+    _send(_text_inputs(text))
+
+
+def retype(erase, text):
+    """Стерти `erase` символів перед курсором і надрукувати `text` — одним викликом
+    SendInput, тож натискання користувача не втиснуться посередині."""
+    seq = [_key(VK_BACK), _key(VK_BACK, True)] * erase + _text_inputs(text)
+    arr = (w.INPUT * len(seq))(*seq)
+    return w.SendInput(len(seq), arr, ctypes.sizeof(w.INPUT)) == len(seq)
 
 
 def caret_len(text):
@@ -113,6 +127,17 @@ def caret_len(text):
 
 def is_down(vk):
     return bool(w.GetAsyncKeyState(vk) & 0x8000)
+
+
+def caps_on():
+    """Чи увімкнено Caps Lock — за GetKeyState нашого потоку.
+
+    Документація не гарантує, що фоновий потік бачить тут натискання в інших програмах
+    (на Windows 10/11 бачить). Тому це лише вихідна точка, коли стан невідомий: далі
+    перемикання рахує сам трекер з Raw Input. AttachThreadInput, щоб прочитати стан
+    активного вікна, не підходить: він скидає стан клавіш (зокрема утримуваних
+    модифікаторів) того вікна."""
+    return bool(w.GetKeyState(VK_CAPITAL) & 1)
 
 
 def neutralize_alt_win():
@@ -149,7 +174,7 @@ def press_modifiers(vks):
     _send(seq)
 
 
-def _sided(vk, make_code, flags):
+def sided(vk, make_code, flags):
     """Raw Input дає загальні VK_SHIFT/CONTROL/MENU — уточнюємо лівий/правий."""
     if vk == VK_SHIFT:
         return 0xA1 if make_code == 0x36 else 0xA0
@@ -165,8 +190,11 @@ class PhysicalKeys:
     SendInput (hDevice = 0), ігноруються, тож видно, що користувач реально тримає,
     навіть коли ми логічно відпустили модифікатори."""
 
-    def __init__(self, hwnd):
+    def __init__(self, hwnd, keep=False):
+        """keep — Raw Input клавіатури зареєстровано й поза сеансом (автовиправлення
+        розкладки), тож close() його не знімає."""
         self.hwnd = hwnd
+        self.keep = keep
         self._register(w.RIDEV_INPUTSINK, hwnd)
         # Знімок після реєстрації: усе, що зміниться далі, прийде подіями
         self.down = {vk for vk in SIDED_MODIFIER_VKS if is_down(vk)}
@@ -180,7 +208,8 @@ class PhysicalKeys:
             raise OSError(ctypes.get_last_error(), "RegisterRawInputDevices failed")
 
     def close(self):
-        self._register(w.RIDEV_REMOVE, None)
+        if not self.keep:
+            self._register(w.RIDEV_REMOVE, None)
 
     def held(self, groups):
         """groups: [(лівий, правий), ...] — чи утримується зараз хоча б одна клавіша з кожної групи."""
@@ -213,7 +242,7 @@ class PhysicalKeys:
                 log.debug("raw input: unreadable event (%d)", got)
                 continue
             kb = rec.keyboard
-            vk = _sided(kb.VKey, kb.MakeCode, kb.Flags)
+            vk = sided(kb.VKey, kb.MakeCode, kb.Flags)
             log.debug("raw input: vk=%#x make=%#x flags=%#x device=%s", kb.VKey, kb.MakeCode, kb.Flags,
                       rec.header.hDevice)
             if not rec.header.hDevice or vk not in SIDED_MODIFIER_VKS:

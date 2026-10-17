@@ -9,13 +9,18 @@ from ctypes import wintypes as W
 import winapi as w
 
 # Клавіші, що друкують символи: цифри, літери, OEM-клавіші (;=,-./`[\]' та <> на ISO)
-_TYPING_VKS = (list(range(0x30, 0x3A)) + list(range(0x41, 0x5B)) +
-               list(range(0xBA, 0xC1)) + list(range(0xDB, 0xE0)) + [0xE2])
+TYPING_VKS = frozenset(list(range(0x30, 0x3A)) + list(range(0x41, 0x5B)) +
+                       list(range(0xBA, 0xC1)) + list(range(0xDB, 0xE0)) + [0xE2])
 # Стани модифікаторів: (Shift, AltGr). Порядок = пріоритет при неоднозначності.
 _STATES = ((False, False), (True, False), (False, True), (True, True))
 _TOUNICODE_NO_STATE_CHANGE = 0x4
 
 _cache = {}
+
+
+def state_index(shift, altgr):
+    """Номер стану модифікаторів у _STATES (другий елемент ключа key_to_char)."""
+    return _STATES.index((bool(shift), bool(altgr)))
 
 
 class KeyMap:
@@ -31,7 +36,7 @@ class KeyMap:
                 state[0x10] = state[0xA0] = 0x80
             if altgr:
                 state[0x11] = state[0xA2] = state[0x12] = state[0xA5] = 0x80
-            for vk in _TYPING_VKS:
+            for vk in sorted(TYPING_VKS):
                 scan = w.MapVirtualKeyExW(vk, 0, hkl)
                 rc = w.ToUnicodeEx(vk, scan, state, buf, 8, _TOUNICODE_NO_STATE_CHANGE, hkl)
                 if rc < 0:

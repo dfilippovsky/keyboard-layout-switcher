@@ -67,6 +67,8 @@ def run(app):
 
     switch_var = tk.BooleanVar(value=cfg.switch_layout)
     reselect_var = tk.BooleanVar(value=cfg.reselect)
+    autocorrect_var = tk.BooleanVar(value=cfg.autocorrect)
+    exclude_var = tk.StringVar(value=cfg.autocorrect_exclude)
     enabled_var = tk.BooleanVar(value=cfg.enabled)
     autostart_var = tk.BooleanVar(value=config.autostart_enabled())
     timeout_var = tk.StringVar(value=str(cfg.copy_timeout_ms))
@@ -87,15 +89,23 @@ def run(app):
               foreground="gray").grid(row=row, column=1, sticky="w", pady=(2, 10))
 
     checks = (
-        (enabled_var, "Увімкнено (реагувати на гарячі клавіші)"),
+        (enabled_var, "Увімкнено (гарячі клавіші й автовиправлення)"),
         (switch_var, "Перемикати розкладку після конвертації"),
         (reselect_var, "Виділяти перетворений текст (повторне натискання — далі по колу)"),
+        (autocorrect_var, "Автовиправлення розкладки під час набору (ghbdsn → привіт)"),
         (autostart_var, "Запускати разом з Windows"),
     )
     for i, (var, text) in enumerate(checks, start=row + 1):
         ttk.Checkbutton(frm, text=text, variable=var).grid(row=i, column=0, columnspan=2, sticky="w", pady=2)
 
     row += 1 + len(checks)
+    ttk.Label(frm, text="Не виправляти в програмах:").grid(row=row, column=0, sticky="w", pady=(6, 0))
+    ttk.Entry(frm, textvariable=exclude_var, width=26).grid(row=row, column=1, sticky="ew", pady=(6, 0))
+    ttk.Label(frm, text="Імена exe через кому, напр. WindowsTerminal.exe, code.exe.\n"
+                        "Скасувати виправлення — одразу натиснути гарячу клавішу розкладки.",
+              foreground="gray").grid(row=row + 1, column=1, sticky="w", pady=(2, 0))
+
+    row += 2
     ttk.Label(frm, text="Очікування Ctrl+C, мс:").grid(row=row, column=0, sticky="w", pady=(10, 0))
     ttk.Spinbox(frm, from_=50, to=5000, increment=50, width=8,
                 textvariable=timeout_var).grid(row=row, column=1, sticky="w", pady=(10, 0))
@@ -133,6 +143,8 @@ def run(app):
         values = {field: get() for field, get in hotkeys.items()}
         values.update(enabled=enabled_var.get(), switch_layout=switch_var.get(),
                       reselect=reselect_var.get(), copy_timeout_ms=timeout,
+                      autocorrect=autocorrect_var.get(),
+                      autocorrect_exclude=", ".join(n.strip() for n in exclude_var.get().split(",") if n.strip()),
                       eye_breaks=eyes_var.get(), eye_break_minutes=eye_minutes,
                       eye_break_popup_seconds=eye_popup)
         error = app.apply_settings(values, autostart_var.get())

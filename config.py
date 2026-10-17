@@ -35,6 +35,11 @@ translit_hotkey = {translit_hotkey}
 enabled = {enabled}
 ; Після конвертації перемикати розкладку активного вікна на цільову
 switch_layout = {switch_layout}
+; Автовиправлення під час набору: слово, набране не в тій розкладці (ghbdsn), після
+; пробілу стає правильним (привіт). Скасувати — одразу натиснути гарячу клавішу розкладки.
+autocorrect = {autocorrect}
+; Програми, в яких не виправляти, через кому (ім'я exe), напр.: WindowsTerminal.exe, code.exe
+autocorrect_exclude = {autocorrect_exclude}
 ; Після конвертації виділеного тексту виділити його знову (повторне натискання — наступна розкладка)
 reselect = {reselect}
 ; Скільки чекати (мс), поки програма скопіює текст у буфер після Ctrl+C
@@ -69,6 +74,8 @@ class Config:
     translit_hotkey: str = "Ctrl+Pause"
     enabled: bool = True
     switch_layout: bool = True
+    autocorrect: bool = True
+    autocorrect_exclude: str = ""
     reselect: bool = True
     copy_timeout_ms: int = 250
     eye_breaks: bool = True
@@ -87,9 +94,9 @@ class Config:
         cp.read(path, encoding="utf-8-sig")
         sec = cp["general"] if cp.has_section("general") else {}
         cfg.hotkey = sec.get("hotkey", cfg.hotkey).strip() or cfg.hotkey
-        for key in ("case_hotkey", "translit_hotkey"):  # порожнє значення = вимкнено
+        for key in ("case_hotkey", "translit_hotkey", "autocorrect_exclude"):  # порожнє = вимкнено / нічого
             setattr(cfg, key, sec.get(key, getattr(cfg, key)).strip())
-        for key in ("enabled", "switch_layout", "reselect", "eye_breaks"):
+        for key in ("enabled", "switch_layout", "autocorrect", "reselect", "eye_breaks"):
             try:
                 setattr(cfg, key, cp.getboolean("general", key, fallback=getattr(cfg, key)))
             except ValueError:
@@ -107,6 +114,10 @@ class Config:
             except OSError:
                 pass  # не вдалося дописати (лише для читання) — працюємо зі значеннями за замовчуванням
         return cfg
+
+    def excluded_apps(self):
+        """Множина імен exe (у нижньому регістрі), де автовиправлення вимкнене."""
+        return {name.strip().lower() for name in self.autocorrect_exclude.split(",") if name.strip()}
 
     def _values(self):
         return {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in asdict(self).items()}
