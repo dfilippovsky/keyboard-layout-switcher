@@ -6,6 +6,7 @@ from ctypes import wintypes as W
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
 LRESULT = ctypes.c_ssize_t
 ULONG_PTR = ctypes.c_size_t
@@ -140,6 +141,11 @@ IsClipboardFormatAvailable = _f(user32, "IsClipboardFormatAvailable", W.BOOL, W.
 GetClipboardSequenceNumber = _f(user32, "GetClipboardSequenceNumber", W.DWORD)
 RegisterClipboardFormatW = _f(user32, "RegisterClipboardFormatW", W.UINT, W.LPCWSTR)
 
+# gdi32 — розширені метафайли в буфері обміну
+GetEnhMetaFileBits = _f(gdi32, "GetEnhMetaFileBits", W.UINT, W.HANDLE, W.UINT, W.LPVOID)
+SetEnhMetaFileBits = _f(gdi32, "SetEnhMetaFileBits", W.HANDLE, W.UINT, ctypes.c_char_p)
+DeleteEnhMetaFile = _f(gdi32, "DeleteEnhMetaFile", W.BOOL, W.HANDLE)
+
 # kernel32
 GlobalAlloc = _f(kernel32, "GlobalAlloc", W.HGLOBAL, W.UINT, ctypes.c_size_t)
 GlobalLock = _f(kernel32, "GlobalLock", W.LPVOID, W.HGLOBAL)
@@ -147,32 +153,11 @@ GlobalUnlock = _f(kernel32, "GlobalUnlock", W.BOOL, W.HGLOBAL)
 GlobalSize = _f(kernel32, "GlobalSize", ctypes.c_size_t, W.HGLOBAL)
 GlobalFree = _f(kernel32, "GlobalFree", W.HGLOBAL, W.HGLOBAL)
 GetModuleHandleW = _f(kernel32, "GetModuleHandleW", W.HMODULE, W.LPCWSTR)
-OpenProcess = _f(kernel32, "OpenProcess", W.HANDLE, W.DWORD, W.BOOL, W.DWORD)
-CloseHandle = _f(kernel32, "CloseHandle", W.BOOL, W.HANDLE)
-QueryFullProcessImageNameW = _f(kernel32, "QueryFullProcessImageNameW", W.BOOL, W.HANDLE, W.DWORD,
-                                W.LPWSTR, ctypes.POINTER(W.DWORD))
 CreateMutexW = _f(kernel32, "CreateMutexW", W.HANDLE, W.LPVOID, W.BOOL, W.LPCWSTR)
 LCIDToLocaleName = _f(kernel32, "LCIDToLocaleName", ctypes.c_int, W.DWORD, W.LPWSTR, ctypes.c_int, W.DWORD)
 
 # shell32
 Shell_NotifyIconW = _f(shell32, "Shell_NotifyIconW", W.BOOL, W.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
-
-
-def process_exe(hwnd):
-    """Ім'я exe процесу, якому належить вікно (у нижньому регістрі), або ''."""
-    pid = W.DWORD()
-    GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    h = OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not h:
-        return ""
-    try:
-        buf = ctypes.create_unicode_buffer(1024)
-        size = W.DWORD(len(buf))
-        if not QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
-            return ""
-        return buf.value.rsplit("\\", 1)[-1].lower()
-    finally:
-        CloseHandle(h)
 
 
 def sleep_pumping(seconds):

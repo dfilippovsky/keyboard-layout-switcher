@@ -186,10 +186,11 @@ class App:
         # Зміни застосовуються або всі, або жодна: спершу автозапуск, потім config.ini,
         # а якщо збереження не вдалося — відкочуємо автозапуск і налаштування в пам'яті.
         old_autostart = config.autostart_enabled()
-        try:
-            config.set_autostart(autostart)
-        except OSError as e:
-            return "Не вдалося змінити автозапуск: %s" % e
+        if autostart != old_autostart:
+            try:
+                config.set_autostart(autostart)
+            except OSError as e:
+                return "Не вдалося змінити автозапуск: %s" % e
         backup = dataclasses.replace(self.cfg)
         for key, value in values.items():
             setattr(self.cfg, key, value)
@@ -197,10 +198,11 @@ class App:
             self.cfg.save()
         except OSError as e:
             self.cfg = backup
-            try:
-                config.set_autostart(old_autostart)
-            except OSError:
-                log.exception("autostart rollback failed")
+            if autostart != old_autostart:
+                try:
+                    config.set_autostart(old_autostart)
+                except OSError:
+                    log.exception("autostart rollback failed")
             return "Не вдалося зберегти %s: %s" % (config.CONFIG_PATH, e)
         self.refresh_tray()
         return None
@@ -248,9 +250,13 @@ class App:
         try:
             text = self.clip.copy_from(kio.copy, timeout)
             log.debug("hotkey: fg=%#x layout=%#x selection=%r", fg, current, text)
-            if text and _looks_like_line_copy(text) and \
-                    w.process_exe(fg) in self.cfg.line_copy_app_set():
-                text = None  # редактор скопіював рядок — виділення насправді немає
+            dst = None
+            if text and _looks_like_line_copy(text):
+                has_selection = self._probe_selection(text, timeout)
+                if has_selection is None:
+                    return
+                if not has_selection:
+                    text = None  # редактор скопіював рядок — виділення насправді немає
             if text:
                 dst, pasted = self._convert_selection(text, hkls, current)
             else:
@@ -262,6 +268,35 @@ class App:
                 log.warning("clipboard contents were not fully restored")
         if dst and self.cfg.switch_layout:
             layouts.switch(fg, dst)
+
+    def _probe_selection(self, text, timeout):
+        """Ctrl+C дав «рядок\\n»: це виділення чи редактор скопіював рядок без виділення?
+
+        Зсуваємо активний кінець на символ (Shift+Left) і копіюємо ще раз:
+        - було виділення «рядок\\n» -> виходить «рядок» (або «\\nрядок\\n», якщо виділяли
+          справа наліво);
+        - виділення не було -> виділяється один символ перед курсором.
+        Потім Shift+Right повертає все як було. Повертає True/False або None,
+        якщо однозначно визначити не вдалося (конвертацію перервано).
+        """
+        probe = self.clip.copy_from(kio.extend_left_and_copy, timeout)
+        log.debug("selection probe: %r", probe)
+        if probe == text:
+            return False  # Shift+Left нічого не змінив (початок документа) — виділення нема
+        kio.press(kio.VK_RIGHT, (kio.VK_SHIFT,))
+        if probe is None:
+            _abort("selection probe copy failed")
+            return None
+        body = text.rstrip("\r\n")
+        selected = probe == body or probe.endswith(text)
+        single_char = kio.caret_len(probe) == 1
+        if selected and single_char:
+            _abort("one-character line: cannot tell a selection from a line copy")
+            return None
+        if selected or single_char:
+            return selected
+        _abort("unexpected selection probe result")
+        return None
 
     def _convert_selection(self, text, hkls, current):
         src = layouts.detect_source(text, hkls, current)
@@ -300,10 +335,15 @@ class App:
                     _abort("copy failed while selecting the last word")
                 return None
             if t == selected:
-                break
+                break  # далі не розширюється — початок поля
             selected = t
             if _WS.search(selected.rstrip()):
-                break
+                break  # дійшли до пробілу перед словом
+        else:
+            # Межу слова так і не знайдено — не замінюємо лише частину.
+            kio.press(kio.VK_RIGHT)
+            _abort("word boundary not found in %d steps" % _MAX_WORD_STEPS)
+            return None
 
         core = selected.rstrip()
         suffix = selected[len(core):]
