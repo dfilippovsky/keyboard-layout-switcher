@@ -97,7 +97,10 @@ Everything is stored in `config.ini` next to `main.py` / the exe (created on fir
 
 After editing the file manually, use “Reload config.ini” in the tray menu. The app writes
 the file atomically (via a temporary `config.ini.tmp`), so a failed write never corrupts
-the existing file.
+the existing file. If `config.ini` comes from an older version and is missing some keys,
+they are appended to the `[general]` section on load. Nothing else in the file changes:
+values, your comments, extra keys and sections stay as they are. Saving from the settings
+window or the tray menu rewrites the file from the template.
 
 Key names: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Pause`, `Space`, `Tab`, `Enter`, `Esc`,
 `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Left`/`Up`/`Right`/`Down`,
@@ -143,6 +146,11 @@ Same app, the only difference is packaging and startup:
 | Distribution     | one file — easy to copy/share                          | the whole folder has to be moved            |
 
 In both cases `config.ini` and the log live next to the exe, and autostart points to the exe.
+`build.ps1` keeps the existing `config.ini` there (for `-OneDir` too, where PyInstaller
+recreates the whole folder) and adds the keys of the new version to it; if there is no file
+yet, it creates one with the defaults. While building, a copy of the config is kept in `build\`.
+It is put back even if the build fails, and a copy left behind by an interrupted build is
+restored on the next run.
 
 For an app that sits in the tray all the time and starts with Windows, `-OneDir` is a bit
 better (less RAM, faster start). Use the single file when easy sharing matters more.
@@ -290,6 +298,10 @@ plays and the reason is logged) if:
 
 Після ручного редагування — меню трею «Перечитати config.ini». Програма записує файл
 атомарно (через тимчасовий `config.ini.tmp`), тож збій запису не пошкодить чинний файл.
+Якщо `config.ini` від старішої версії і в ньому бракує ключів, вони дописуються в секцію
+`[general]` при завантаженні. Решта файлу не змінюється: значення, ваші коментарі, зайві
+ключі й секції лишаються як є. Збереження з вікна налаштувань чи меню трею переписує файл
+за шаблоном.
 
 Назви клавіш: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Pause`, `Space`, `Tab`, `Enter`, `Esc`,
 `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Left`/`Up`/`Right`/`Down`,
@@ -335,6 +347,11 @@ $env:KLS_DEBUG = "1"; .venv\Scripts\python.exe main.py
 | Поширення           | один файл — зручно скопіювати/передати           | треба переносити всю папку                |
 
 В обох варіантах `config.ini` і лог лежать поруч з exe, автозапуск вказує на exe.
+`build.ps1` зберігає наявний там `config.ini` (і для `-OneDir`, де PyInstaller перестворює
+всю папку) та дописує в нього ключі нової версії; якщо файлу ще немає — створює його
+з налаштуваннями за замовчуванням. На час збірки копія конфігу лежить у `build\`. Вона
+повертається навіть тоді, коли збірка падає, а копія, що лишилася від перерваної збірки,
+відновлюється при наступному запуску.
 
 Для програми, що постійно висить у треї й стартує з Windows, трохи вигідніший `-OneDir`
 (менше RAM, швидший старт). Один файл — коли важливіше, щоб його було легко передати.
