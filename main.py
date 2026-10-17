@@ -279,16 +279,38 @@ class App:
         Потім Shift+Right повертає все як було. Повертає True/False або None,
         якщо однозначно визначити не вдалося (конвертацію перервано).
         """
+        if not text.strip():
+            log.debug("only a line break was copied — nothing to convert")
+            return None
         probe = self.clip.copy_from(kio.extend_left_and_copy, timeout)
-        log.debug("selection probe: %r", probe)
+        log.debug("selection probe (left): %r", probe)
         if probe == text:
-            return False  # Shift+Left нічого не змінив (початок документа) — виділення нема
+            # Shift+Left нічого не змінив: активний кінець на початку поля. Або виділення
+            # нема, або його виділяли справа наліво до самого початку — пробуємо вправо.
+            return self._probe_from_field_start(text, timeout)
         kio.press(kio.VK_RIGHT, (kio.VK_SHIFT,))
+        if probe is None:
+            return self._classify_probe(None, False)
+        return self._classify_probe(probe, probe == text.rstrip("\r\n") or probe.endswith(text))
+
+    def _probe_from_field_start(self, text, timeout):
+        """Shift+Right від початку поля: зворотне виділення «рядок\\n» звузиться
+        до «ядок\\n», а без виділення виділиться один символ."""
+        probe = self.clip.copy_from(kio.extend_right_and_copy, timeout)
+        log.debug("selection probe (right): %r", probe)
+        if probe == text:
+            _abort("selection probe: the caret moves neither left nor right")
+            return None
+        kio.press(kio.VK_LEFT, (kio.VK_SHIFT,))
+        return self._classify_probe(probe, probe == text[1:])
+
+    @staticmethod
+    def _classify_probe(probe, looks_selected):
+        """True — виділення було, False — ні, None — неоднозначно (перервано)."""
         if probe is None:
             _abort("selection probe copy failed")
             return None
-        body = text.rstrip("\r\n")
-        selected = probe == body or probe.endswith(text)
+        selected = looks_selected
         single_char = kio.caret_len(probe) == 1
         if selected and single_char:
             _abort("one-character line: cannot tell a selection from a line copy")

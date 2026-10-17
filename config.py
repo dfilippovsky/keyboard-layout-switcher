@@ -65,9 +65,22 @@ class Config:
         return cfg
 
     def save(self):
+        """Атомарний запис: тимчасовий файл + os.replace, тож при збої старий
+        config.ini лишається цілим."""
         values = {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in asdict(self).items()}
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            f.write(_TEMPLATE.format(**values))
+        tmp = CONFIG_PATH + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(_TEMPLATE.format(**values))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, CONFIG_PATH)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
