@@ -4,6 +4,7 @@ import re
 import winapi as w
 
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
+VK_CANCEL, VK_PAUSE = 0x03, 0x13
 
 _MOD_ORDER = ((MOD_CONTROL, "Ctrl"), (MOD_ALT, "Alt"), (MOD_SHIFT, "Shift"), (MOD_WIN, "Win"))
 _MOD_ALIASES = {"ctrl": MOD_CONTROL, "control": MOD_CONTROL, "alt": MOD_ALT,
@@ -56,6 +57,37 @@ def format(mods, vk):
     else:
         parts.append("VK%02X" % vk)
     return "+".join(parts)
+
+
+def normalize_vk(vk):
+    """З Ctrl клавіша Pause надсилає VK_CANCEL (Ctrl+Break) — вважаємо це Pause."""
+    return VK_PAUSE if vk == VK_CANCEL else vk
+
+
+def register_vks(mods, vk):
+    """Віртуальні коди, які треба зареєструвати для комбінації: Ctrl+Pause на більшості
+    клавіатур приходить як VK_CANCEL, тож для неї реєструємо обидва."""
+    if vk == VK_PAUSE and mods & MOD_CONTROL:
+        return (VK_PAUSE, VK_CANCEL)
+    return (vk,)
+
+
+_MOD_SIDED_VKS = ((MOD_CONTROL, (0xA2, 0xA3)), (MOD_ALT, (0xA4, 0xA5)),
+                  (MOD_SHIFT, (0xA0, 0xA1)), (MOD_WIN, (0x5B, 0x5C)))
+
+
+def modifier_groups(mods):
+    """[(лівий VK, правий VK), ...] для кожного модифікатора комбінації."""
+    return [vks for m, vks in _MOD_SIDED_VKS if mods & m]
+
+
+def mods_from_vks(down):
+    """Маска MOD_* за набором утримуваних лівих/правих модифікаторів."""
+    mods = 0
+    for m, vks in _MOD_SIDED_VKS:
+        if down.intersection(vks):
+            mods |= m
+    return mods
 
 
 def current_mods():

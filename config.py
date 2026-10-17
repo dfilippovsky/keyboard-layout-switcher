@@ -21,9 +21,15 @@ _TEMPLATE = """\
 ; Можна редагувати вручну, після чого в меню трею вибрати «Перечитати config.ini».
 
 [general]
-; Гаряча клавіша: Ctrl/Alt/Shift/Win + клавіша. Приклади: Pause, Shift+Pause, Ctrl+Alt+Space, Alt+F12
+; Гаряча клавіша конвертації розкладки: Ctrl/Alt/Shift/Win + клавіша.
+; Приклади: Pause, Shift+Pause, Ctrl+Alt+Space, Alt+F12
 hotkey = {hotkey}
-; Реагувати на гарячу клавішу (true/false)
+; Зміна регістру по колу: lower → UPPER → Title → camelCase → snake_case → kebab-case
+; (порожньо — вимкнено)
+case_hotkey = {case_hotkey}
+; Транслітерація українського тексту латиницею (порожньо — вимкнено)
+translit_hotkey = {translit_hotkey}
+; Реагувати на гарячі клавіші (true/false)
 enabled = {enabled}
 ; Після конвертації перемикати розкладку активного вікна на цільову
 switch_layout = {switch_layout}
@@ -31,16 +37,29 @@ switch_layout = {switch_layout}
 reselect = {reselect}
 ; Скільки чекати (мс), поки програма скопіює текст у буфер після Ctrl+C
 copy_timeout_ms = {copy_timeout_ms}
+; Нагадування 20-20-20: кожні N хвилин подивитися вдалину (true/false)
+eye_breaks = {eye_breaks}
+; Інтервал нагадувань, хв (1–240)
+eye_break_minutes = {eye_break_minutes}
+; Через скільки секунд сповіщення закривається само (0 — як вирішить Windows)
+eye_break_popup_seconds = {eye_break_popup_seconds}
 """
+
+HOTKEY_FIELDS = ("hotkey", "case_hotkey", "translit_hotkey")
 
 
 @dataclass
 class Config:
     hotkey: str = "Pause"
+    case_hotkey: str = "Alt+Pause"
+    translit_hotkey: str = "Ctrl+Pause"
     enabled: bool = True
     switch_layout: bool = True
     reselect: bool = True
     copy_timeout_ms: int = 250
+    eye_breaks: bool = True
+    eye_break_minutes: int = 20
+    eye_break_popup_seconds: int = 5
 
     @classmethod
     def load(cls):
@@ -52,16 +71,19 @@ class Config:
         cp.read(CONFIG_PATH, encoding="utf-8-sig")
         sec = cp["general"] if cp.has_section("general") else {}
         cfg.hotkey = sec.get("hotkey", cfg.hotkey).strip() or cfg.hotkey
-        for key in ("enabled", "switch_layout", "reselect"):
+        for key in ("case_hotkey", "translit_hotkey"):  # порожнє значення = вимкнено
+            setattr(cfg, key, sec.get(key, getattr(cfg, key)).strip())
+        for key in ("enabled", "switch_layout", "reselect", "eye_breaks"):
             try:
                 setattr(cfg, key, cp.getboolean("general", key, fallback=getattr(cfg, key)))
             except ValueError:
                 pass
-        try:
-            cfg.copy_timeout_ms = max(50, min(5000, cp.getint("general", "copy_timeout_ms",
-                                                              fallback=cfg.copy_timeout_ms)))
-        except ValueError:
-            pass
+        for key, lo, hi in (("copy_timeout_ms", 50, 5000), ("eye_break_minutes", 1, 240),
+                            ("eye_break_popup_seconds", 0, 120)):
+            try:
+                setattr(cfg, key, max(lo, min(hi, cp.getint("general", key, fallback=getattr(cfg, key)))))
+            except ValueError:
+                pass
         return cfg
 
     def save(self):
