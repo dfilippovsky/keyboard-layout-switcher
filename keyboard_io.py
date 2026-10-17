@@ -146,6 +146,13 @@ def neutralize_alt_win():
         _send([_key(VK_UNASSIGNED), _key(VK_UNASSIGNED, True)])
 
 
+def unlock_foreground():
+    """Windows дозволяє робити вікно активним лише процесу, який отримав останнє введення.
+    Натискання Alt (з «порожньою» клавішею, щоб не відкрилося меню вікна) знімає це
+    обмеження для нас."""
+    _send([_key(VK_MENU), _key(VK_UNASSIGNED), _key(VK_UNASSIGNED, True), _key(VK_MENU, True)])
+
+
 def wait_modifiers_released(timeout):
     end = time.monotonic() + timeout
     while any(is_down(vk) for vk in MODIFIER_VKS):

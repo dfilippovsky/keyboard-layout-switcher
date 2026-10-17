@@ -9,6 +9,7 @@ import re
 import sys
 import time
 
+import actions
 import autocorrect
 import config
 import eyecare
@@ -23,21 +24,30 @@ from clipboard import Clipboard
 
 log = logging.getLogger("kls")
 
-# Дії за гарячими клавішами: id -> поле config
+# Дії. Номер дії — це й id її гарячої клавіші: вбудовані 1–3, плагіни з _PLUGIN_BASE.
 HOTKEY_LAYOUT, HOTKEY_CASE, HOTKEY_TRANSLIT = 1, 2, 3
-_HOTKEY_FIELDS = dict(zip((HOTKEY_LAYOUT, HOTKEY_CASE, HOTKEY_TRANSLIT), config.HOTKEY_FIELDS))
-_HOTKEY_LABELS = {HOTKEY_LAYOUT: "Розкладка", HOTKEY_CASE: "Регістр", HOTKEY_TRANSLIT: "Транслітерація"}
-_HOTKEY_ALIAS = 10       # id + 10 — додатковий код тієї ж комбінації (Ctrl+Pause = VK_CANCEL)
-_FLASH_COLORS = {HOTKEY_LAYOUT: icon.FLASH_COLOR, HOTKEY_CASE: icon.CASE_FLASH_COLOR,
-                 HOTKEY_TRANSLIT: icon.TRANSLIT_FLASH_COLOR}
+# номер -> (ключ, поле config з гарячою клавішею, назва, колір у треї)
+_BUILTIN = {
+    HOTKEY_LAYOUT: ("layout", "hotkey", "Розкладка", icon.FLASH_COLOR),
+    HOTKEY_CASE: ("case", "case_hotkey", "Регістр", icon.CASE_FLASH_COLOR),
+    HOTKEY_TRANSLIT: ("translit", "translit_hotkey", "Транслітерація", icon.TRANSLIT_FLASH_COLOR),
+}
+_BUILTIN_FIELDS = {key: field for key, field, _, _ in _BUILTIN.values()}
+_PLUGIN_BASE = 100
+_HOTKEY_ALIAS = 0x1000   # id + 0x1000 — додатковий код тієї ж комбінації (Ctrl+Pause = VK_CANCEL)
 FLASH_TIMER_ID = 1
 EYE_TIMER_ID = 2
 EYE_HIDE_TIMER_ID = 3
-_SWALLOW_ID = 50       # тимчасові «голі» клавіші під час утримання модифікатора
+_SWALLOW_ID = 0x3000   # тимчасові «голі» клавіші під час утримання модифікатора
+_FOCUS_TIMEOUT = 1.0   # с — чекати, поки вікно знову стане активним після меню
 _HOLD_TIMEOUT = 10.0   # с без натискань — завершити утримання
 _FLASH_MS = 350          # скільки іконка в треї світиться кольором дії після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
-ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT = range(100, 107)
+ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS = range(100, 108)
+ID_ACTION_BASE = 1000    # пункт меню «Дії» = ID_ACTION_BASE + номер дії
+# Вікна, які не є «робочими»: панель задач, область сповіщень, робочий стіл
+_SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
+                  "TopLevelWindowForOverflowXamlIsland", "Progman", "WorkerW"}
 EXCEPTIONS_PATH = os.path.join(config.app_dir(), "autocorrect_exceptions.txt")
 _RAW_KEYBOARD, _RAW_MOUSE = 0x06, 0x02   # Generic Desktop: клавіатура, миша
 _WS = re.compile(r"\s")
@@ -67,8 +77,9 @@ class App:
         self.settings_root = None
         self.exit_pending = False
         self.hicon = None
-        self.flash_icons = {}
-        self.flashing = None     # id дії, кольором якої зараз світиться іконка
+        self.flash_icons = {}    # колір -> іконка
+        self.flashing = None     # колір, яким зараз світиться іконка
+        self.actions = {}        # номер -> actions.Action
         self.case_cycler = textcase.CaseCycler()
         self.eyes = eyecare.EyeBreaks()
         self.eye_icon = None
@@ -88,9 +99,16 @@ class App:
                                       None, None, hinst, None)
         self.clip = Clipboard(self.hwnd)
 
+        failed_plugins = self._load_actions()
         self._update_icon()
         self._tray(w.NIM_ADD)
-        self._warn_failed(self._register_hotkeys())
+        self._warn_failed(self._register_hotkeys(), failed_plugins)
+        # Останнє активне вікно — для дій з меню трею (WinEvent, без хуків клавіатури)
+        self.last_window = None
+        self._remember_window(w.GetForegroundWindow())
+        self._win_event = w.WINEVENTPROC(self._on_foreground)  # тримаємо посилання від GC
+        self._win_event_hook = w.SetWinEventHook(w.EVENT_SYSTEM_FOREGROUND, w.EVENT_SYSTEM_FOREGROUND,
+                                                 None, self._win_event, 0, 0, w.WINEVENT_OUTOFCONTEXT)
         self._update_raw_input()
         w.SetTimer(self.hwnd, EYE_TIMER_ID, eyecare.TICK_MS, None)
 
@@ -109,7 +127,7 @@ class App:
         if action != w.NIM_DELETE:
             nid.uFlags = w.NIF_MESSAGE | w.NIF_ICON | w.NIF_TIP
             nid.uCallbackMessage = WM_TRAY
-            nid.hIcon = self.flash_icons[self.flashing] if self.flashing else self.hicon
+            nid.hIcon = self.flash_icons.get(self.flashing) or self.hicon
             nid.szTip = self._tooltip()
             if info is not None:  # "" — прибрати показане сповіщення
                 nid.uFlags |= w.NIF_INFO
@@ -127,7 +145,7 @@ class App:
         old = (self.hicon, *self.flash_icons.values())
         size = w.GetSystemMetrics(w.SM_CXSMICON) or 16
         self.hicon = icon.create_hicon(size, icon.tray_color(self.cfg.enabled))
-        self.flash_icons = {a: icon.create_hicon(size, c) for a, c in _FLASH_COLORS.items()}
+        self.flash_icons = {c: icon.create_hicon(size, c) for c in {a.color for a in self.actions.values()}}
         if old[0]:
             self._tray(w.NIM_MODIFY)
             for h in old:
@@ -135,7 +153,7 @@ class App:
 
     def flash(self, action):
         """Коротко підсвітити іконку в треї кольором дії."""
-        self.flashing = action
+        self.flashing = self.actions[action].color
         self._tray(w.NIM_MODIFY)
         w.SetTimer(self.hwnd, FLASH_TIMER_ID, _FLASH_MS, None)
         log.debug("tray flash on")
@@ -155,10 +173,17 @@ class App:
                    balloon_icon=balloon_icon)
 
     def show_menu(self):
+        # Клік по треї активує панель задач, тож дії з меню виконуються для вікна,
+        # яке було активним до цього
+        target = self.last_window
         m = w.CreatePopupMenu()
-        for action, field in _HOTKEY_FIELDS.items():
-            w.AppendMenuW(m, w.MF_STRING | w.MF_GRAYED, 0, "%s: %s" % (
-                _HOTKEY_LABELS[action], getattr(self.cfg, field) or "вимкнено"))
+        sub = w.CreatePopupMenu()
+        for num, action in self.actions.items():
+            if action.menu:
+                text = self.hotkey_text(action)
+                w.AppendMenuW(sub, w.MF_STRING, ID_ACTION_BASE + num,
+                              action.title + ("\t" + text if text else ""))
+        w.AppendMenuW(m, w.MF_POPUP, sub, "Дії")
         w.AppendMenuW(m, w.MF_SEPARATOR, 0, None)
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.enabled else 0), ID_ENABLED, "Увімкнено")
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.autocorrect else 0), ID_AUTOCORRECT,
@@ -167,7 +192,8 @@ class App:
                       "Нагадування 20-20-20 для очей")
         w.AppendMenuW(m, w.MF_STRING, ID_SETTINGS, "Налаштування…")
         w.AppendMenuW(m, w.MF_STRING, ID_OPEN_INI, "Відкрити config.ini")
-        w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, "Перечитати config.ini")
+        w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, "Перечитати config.ini і плагіни")
+        w.AppendMenuW(m, w.MF_STRING, ID_PLUGINS, "Відкрити папку плагінів")
         w.AppendMenuW(m, w.MF_SEPARATOR, 0, None)
         w.AppendMenuW(m, w.MF_STRING, ID_EXIT, "Вихід")
         w.SetMenuDefaultItem(m, ID_SETTINGS, False)
@@ -198,8 +224,83 @@ class App:
             os.startfile(config.CONFIG_PATH)
         elif cmd == ID_RELOAD:
             self.reload_config()
+        elif cmd == ID_PLUGINS:
+            directory = actions.plugins_dir(config.app_dir())
+            os.makedirs(directory, exist_ok=True)
+            os.startfile(directory)
         elif cmd == ID_EXIT:
             self.exit()
+        elif cmd - ID_ACTION_BASE in self.actions:
+            self.run_action(cmd - ID_ACTION_BASE, target)
+
+    def _on_foreground(self, _hook, _event, hwnd, id_object, _id_child, _thread, _time):
+        """EVENT_SYSTEM_FOREGROUND (WinEvent — не хук клавіатури)."""
+        try:
+            if id_object == 0:
+                self._remember_window(hwnd)
+        except Exception:
+            log.exception("foreground event failed")
+
+    def _remember_window(self, hwnd):
+        """Запам'ятати останнє «робоче» активне вікно — не панель задач, не робочий
+        стіл і не вікна самої програми: для нього виконуються дії з меню трею."""
+        if not hwnd:
+            return
+        pid = ctypes.c_ulong()
+        w.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value != os.getpid() and w.class_name(hwnd) not in _SHELL_CLASSES:
+            self.last_window = hwnd
+
+    # ---------- дії ----------
+
+    def _load_actions(self):
+        """Вбудовані дії + plugins/*.py. Повертає [(файл, помилка)] плагінів, що не завантажилися."""
+        self._unregister_hotkeys()
+        registry = actions.Registry()
+        steps = {HOTKEY_LAYOUT: self._convert_layout, HOTKEY_CASE: self._toggle_case,
+                 HOTKEY_TRANSLIT: self._transliterate}
+        for num, (key, _field, title, color) in _BUILTIN.items():
+            registry.add(actions.Action(key, title, steps[num], color=color, num=num))
+        failed = actions.load_plugins(registry, actions.plugins_dir(config.app_dir()), self)
+        for i, action in enumerate(registry.plugin_actions()):
+            action.num = _PLUGIN_BASE + i
+        self.actions = {a.num: a for a in registry.actions if a.num < _HOTKEY_ALIAS}
+        return failed
+
+    def hotkey_text(self, action, values=None):
+        """Комбінація дії: з config (або з `values` вікна налаштувань); для дій плагінів —
+        з секції [plugins], а якщо там немає — та, що задав плагін."""
+        source = values if values is not None else dataclasses.asdict(self.cfg)
+        field = _BUILTIN_FIELDS.get(action.key)
+        if field:
+            return source[field]
+        return source["plugin_hotkeys"].get(action.key, action.hotkey)
+
+    def run_action(self, num, fg):
+        """Виконати дію з меню (а не гарячою клавішею): спершу повернути фокус вікну fg."""
+        if not fg or not w.IsWindow(fg):
+            w.MessageBeep(0)
+            return
+        if not w.SetForegroundWindow(fg):
+            kio.unlock_foreground()
+            w.SetForegroundWindow(fg)
+        end = time.monotonic() + _FOCUS_TIMEOUT
+        while w.GetForegroundWindow() != fg:
+            if time.monotonic() > end:
+                log.warning("action %d: window %#x did not get focus", num, fg)
+                w.MessageBeep(0)
+                return
+            w.sleep_pumping(0.02)
+        w.sleep_pumping(0.05)  # хай вікно поверне курсор у поле
+        self.on_hotkey(num, fg)
+
+    def edit_text(self, transform):
+        """Для плагінів: замінити виділений текст (або останнє слово) на transform(текст)."""
+        return self._edit_text(transform)
+
+    def type_text(self, text):
+        """Для плагінів: надрукувати текст у позиції курсора."""
+        kio.type_text(text)
 
     # ---------- гаряча клавіша ----------
 
@@ -219,7 +320,7 @@ class App:
 
     def _unregister_hotkeys(self):
         self.registered = {}
-        for action in _HOTKEY_FIELDS:
+        for action in self.actions:
             for i in range(2):
                 w.UnregisterHotKey(self.hwnd, action + i * _HOTKEY_ALIAS)
 
@@ -228,15 +329,15 @@ class App:
         self._unregister_hotkeys()
         failed = []
         self.hotkey_ok = True
-        for action, field in _HOTKEY_FIELDS.items():
-            text = getattr(self.cfg, field)
+        for num, action in self.actions.items():
+            text = self.hotkey_text(action)
             if not text:
                 continue
-            if self._register(action, text):
-                self.registered[action] = hk.parse(text)
+            if self._register(num, text):
+                self.registered[num] = hk.parse(text)
             else:
-                failed.append(text)
-                if action == HOTKEY_LAYOUT:
+                failed.append(text if num in _BUILTIN else "%s (%s)" % (text, action.title))
+                if num == HOTKEY_LAYOUT:
                     self.hotkey_ok = False
         # Натискання гарячої клавіші розкладки не скасовує можливість скасувати автовиправлення
         mods, vk = self.registered.get(HOTKEY_LAYOUT, (0, 0))
@@ -244,15 +345,22 @@ class App:
         self.refresh_tray()
         return failed
 
-    def _warn_failed(self, failed):
+    def _warn_failed(self, failed, failed_plugins=()):
+        parts = []
         if failed:
-            self.notify("Не вдалося зареєструвати: %s. Змініть комбінації в налаштуваннях."
-                        % ", ".join("«%s»" % t for t in failed), warning=True)
+            parts.append("Не вдалося зареєструвати: %s. Змініть комбінації в налаштуваннях."
+                         % ", ".join("«%s»" % t for t in failed))
+        if failed_plugins:
+            parts.append("Не завантажилися плагіни: %s (подробиці в layout_switcher.log)."
+                         % "; ".join("%s — %s" % item for item in failed_plugins))
+        if parts:
+            self.notify(" ".join(parts), warning=True)
 
     def reload_config(self):
         self.cfg = config.Config.load()
         self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
-        self._warn_failed(self._register_hotkeys())
+        failed_plugins = self._load_actions()
+        self._warn_failed(self._register_hotkeys(), failed_plugins)
         self._update_raw_input()
 
     # ---------- налаштування ----------
@@ -310,8 +418,8 @@ class App:
         Остаточно вони зареєструються після закриття вікна."""
         seen = set()
         try:
-            for action, field in _HOTKEY_FIELDS.items():
-                text = values[field]
+            for action, entry in self.actions.items():
+                text = self.hotkey_text(entry, values)
                 if not text:
                     continue
                 try:
@@ -338,10 +446,13 @@ class App:
 
     # ---------- дії з текстом ----------
 
-    def on_hotkey(self, action):
-        if self.busy or not self.cfg.enabled:
+    def on_hotkey(self, action, fg=None):
+        """Виконати дію: за гарячою клавішею (fg=None — для активного вікна) або з меню
+        (fg — вікно, якому вже повернуто фокус; «Увімкнено» тоді не діє — це явний вибір)."""
+        from_menu = fg is not None
+        if self.busy or action not in self.actions or not (from_menu or self.cfg.enabled):
             return
-        fg = w.GetForegroundWindow()
+        fg = fg or w.GetForegroundWindow()
         if not fg or fg == self.hwnd:
             return
         # Текст зараз зміниться — набране до цього вже не відповідає полю
@@ -352,9 +463,12 @@ class App:
             if action == HOTKEY_LAYOUT and correction and fg == correction_fg:
                 self._undo_autocorrect(correction, fg)
             else:
-                self._run_action(action, fg)
-        except Exception:
-            log.exception("hotkey action %d failed", action)
+                self._run_action(action, fg, from_menu)
+        except Exception as e:
+            log.exception("action %s failed", self.actions[action].key)
+            if self.actions[action].plugin:
+                self.notify("Помилка в дії «%s» (плагін %s): %s" % (
+                    self.actions[action].title, self.actions[action].plugin, e), warning=True)
         finally:
             self.busy = False
             # Події модифікаторів під час дії міг забрати PhysicalKeys.poll(), а свої
@@ -366,9 +480,12 @@ class App:
             # тож WM_TIMER прийде вчасно й іконка світиться рівно _FLASH_MS.
             self.flash(action)
 
-    def _run_action(self, action, fg):
-        step = {HOTKEY_LAYOUT: self._convert_layout, HOTKEY_CASE: self._toggle_case,
-                HOTKEY_TRANSLIT: self._transliterate}[action]
+    def _run_action(self, action, fg, from_menu=False):
+        step = self.actions[action].run
+        if from_menu:
+            if kio.wait_modifiers_released(3.0):
+                step(fg)
+            return
         if action not in self.registered:
             return  # комбінація цієї дії не зареєстрована (невалідна чи зайнята)
         mods, vk = self.registered[action]
@@ -472,7 +589,7 @@ class App:
 
     def _blink(self, action):
         """Миттєво блимнути іконкою — відгук на кожен крок."""
-        self.flashing = action
+        self.flashing = self.actions[action].color
         self._tray(w.NIM_MODIFY)
         w.sleep_pumping(0.08)
         self.flashing = None
@@ -837,7 +954,7 @@ class App:
         try:
             if msg == w.WM_INPUT:
                 self._on_raw_input(lparam)  # далі DefWindowProc — так вимагає Raw Input
-            elif msg == w.WM_HOTKEY and wparam % _HOTKEY_ALIAS in _HOTKEY_FIELDS:
+            elif msg == w.WM_HOTKEY and wparam % _HOTKEY_ALIAS in self.actions:
                 self.on_hotkey(wparam % _HOTKEY_ALIAS)
                 return 0
             if msg == w.WM_TIMER and wparam == FLASH_TIMER_ID:
@@ -863,6 +980,8 @@ class App:
                 self.refresh_tray()
             elif msg == w.WM_DESTROY:
                 self._tray(w.NIM_DELETE)
+                if self._win_event_hook:
+                    w.UnhookWinEvent(self._win_event_hook)
                 w.PostQuitMessage(0)
                 return 0
         except Exception:

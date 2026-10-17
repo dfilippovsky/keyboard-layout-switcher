@@ -88,6 +88,20 @@ def run(app):
                         "(для регістру й транслітерації)",
               foreground="gray").grid(row=row, column=1, sticky="w", pady=(2, 10))
 
+    # Дії з плагінів (plugins\*.py): комбінація з [plugins] або та, що задав плагін
+    plugin_actions = [a for a in app.actions.values() if a.plugin]
+    plugin_hotkeys = []  # (дія, функція, що дає вибране значення)
+    if plugin_actions:
+        row += 1
+        ttk.Label(frm, text="Плагіни", font=("Segoe UI", 9, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        for action in plugin_actions:
+            row += 1
+            plugin_hotkeys.append((action, _hotkey_entry(frm, row, action.title + ":", app.hotkey_text(action), True)))
+        row += 1
+        ttk.Label(frm, text="Backspace — вимкнути", foreground="gray").grid(
+            row=row, column=1, sticky="w", pady=(2, 10))
+
     checks = (
         (enabled_var, "Увімкнено (гарячі клавіші й автовиправлення)"),
         (switch_var, "Перемикати розкладку після конвертації"),
@@ -141,6 +155,15 @@ def run(app):
             messagebox.showerror("Помилка", "Затримка, інтервал і час показу мають бути числами.", parent=root)
             return
         values = {field: get() for field, get in hotkeys.items()}
+        # У config лишаються тільки відмінності від того, що задав плагін (і записи
+        # плагінів, яких зараз немає), тож новий хоткей у плагіні підхопиться сам
+        overrides = dict(cfg.plugin_hotkeys)
+        for action, get in plugin_hotkeys:
+            if get() == action.hotkey:
+                overrides.pop(action.key, None)
+            else:
+                overrides[action.key] = get()
+        values["plugin_hotkeys"] = overrides
         values.update(enabled=enabled_var.get(), switch_layout=switch_var.get(),
                       reselect=reselect_var.get(), copy_timeout_ms=timeout,
                       autocorrect=autocorrect_var.get(),

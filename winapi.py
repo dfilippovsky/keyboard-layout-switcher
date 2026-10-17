@@ -11,6 +11,9 @@ gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 LRESULT = ctypes.c_ssize_t
 ULONG_PTR = ctypes.c_size_t
 WNDPROC = ctypes.WINFUNCTYPE(LRESULT, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
+WINEVENTPROC = ctypes.WINFUNCTYPE(None, W.HANDLE, W.DWORD, W.HWND, W.LONG, W.LONG, W.DWORD, W.DWORD)
+EVENT_SYSTEM_FOREGROUND = 0x0003
+WINEVENT_OUTOFCONTEXT = 0x0000
 MSG = W.MSG
 POINT = W.POINT
 
@@ -35,7 +38,7 @@ NIIF_INFO, NIIF_WARNING = 0x01, 0x02
 NIIF_USER, NIIF_NOSOUND, NIIF_LARGE_ICON, NIIF_RESPECT_QUIET_TIME = 0x04, 0x10, 0x20, 0x80
 
 # Меню
-MF_STRING, MF_GRAYED, MF_CHECKED, MF_SEPARATOR = 0x0000, 0x0001, 0x0008, 0x0800
+MF_STRING, MF_GRAYED, MF_CHECKED, MF_POPUP, MF_SEPARATOR = 0x0000, 0x0001, 0x0008, 0x0010, 0x0800
 TPM_RIGHTBUTTON, TPM_NONOTIFY, TPM_RETURNCMD = 0x0002, 0x0080, 0x0100
 
 # Raw Input
@@ -167,6 +170,11 @@ MessageBeep = _f(user32, "MessageBeep", W.BOOL, W.UINT)
 CreateIconFromResourceEx = _f(user32, "CreateIconFromResourceEx", W.HICON, W.LPVOID, W.DWORD, W.BOOL,
                               W.DWORD, ctypes.c_int, ctypes.c_int, W.UINT)
 DestroyIcon = _f(user32, "DestroyIcon", W.BOOL, W.HICON)
+IsWindow = _f(user32, "IsWindow", W.BOOL, W.HWND)
+GetClassNameW = _f(user32, "GetClassNameW", ctypes.c_int, W.HWND, W.LPWSTR, ctypes.c_int)
+SetWinEventHook = _f(user32, "SetWinEventHook", W.HANDLE, W.DWORD, W.DWORD, W.HMODULE, WINEVENTPROC,
+                     W.DWORD, W.DWORD, W.DWORD)
+UnhookWinEvent = _f(user32, "UnhookWinEvent", W.BOOL, W.HANDLE)
 
 # user32 — клавіатура
 GetKeyboardLayout = _f(user32, "GetKeyboardLayout", W.HKL, W.DWORD)
@@ -218,6 +226,11 @@ QueryFullProcessImageNameW = _f(kernel32, "QueryFullProcessImageNameW", W.BOOL, 
 Shell_NotifyIconW = _f(shell32, "Shell_NotifyIconW", W.BOOL, W.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
 SHQueryUserNotificationState = _f(shell32, "SHQueryUserNotificationState", ctypes.c_long,
                                   ctypes.POINTER(ctypes.c_int))
+
+
+def class_name(hwnd):
+    buf = ctypes.create_unicode_buffer(256)
+    return buf.value if GetClassNameW(hwnd, buf, len(buf)) else ""
 
 
 def process_name(hwnd):
