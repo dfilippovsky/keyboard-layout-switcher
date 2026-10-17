@@ -49,7 +49,12 @@ def parse(text):
 
 def format(mods, vk):
     parts = [n for m, n in _MOD_ORDER if mods & m]
-    parts.append(KEY_NAMES.get(vk, "VK%02X" % vk) if vk else "")
+    if not vk:
+        parts.append("")
+    elif vk in KEY_NAMES:
+        parts.append(KEY_NAMES[vk])
+    else:
+        parts.append("VK%02X" % vk)
     return "+".join(parts)
 
 
