@@ -46,12 +46,13 @@ _HOLD_TIMEOUT = 10.0   # с без натискань — завершити у�
 _FLASH_MS = 350          # скільки іконка в треї світиться кольором дії після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
 (ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS,
- ID_WORK) = range(100, 109)
+ ID_WORK, ID_FORCED) = range(100, 110)
 ID_ACTION_BASE = 1000    # пункт меню «Дії» = ID_ACTION_BASE + номер дії
 # Вікна, які не є «робочими»: панель задач, область сповіщень, робочий стіл
 _SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
                   "TopLevelWindowForOverflowXamlIsland", "Progman", "WorkerW"}
 EXCEPTIONS_PATH = os.path.join(config.app_dir(), "autocorrect_exceptions.txt")
+FORCED_PATH = os.path.join(config.app_dir(), "autocorrect_words.txt")
 _RAW_KEYBOARD, _RAW_MOUSE = 0x06, 0x02   # Generic Desktop: клавіатура, миша
 _WS = re.compile(r"\s")
 _MAX_WORD_STEPS = 8      # скільки разів Ctrl+Shift+Left шукати початок слова
@@ -91,7 +92,8 @@ class App:
         self.work = eyecare.WorkBreaks()
         self.work_icon = None
         self.tracker = autocorrect.Tracker()
-        self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
+        self.ac_exceptions = autocorrect.load_words(EXCEPTIONS_PATH)
+        self.forced_words = autocorrect.ForcedWords(FORCED_PATH)
         self.raw = {_RAW_KEYBOARD: False, _RAW_MOUSE: False}  # що зараз зареєстровано в Raw Input
         self.ac_tracking = False  # автовиправлення стежить за клавіатурою (Raw Input — ще й для перерв)
         self._raw_buf = (ctypes.c_byte * 64)()  # з запасом: RAWINPUT більший за заголовок + дані
@@ -204,6 +206,7 @@ class App:
         w.AppendMenuW(m, w.MF_STRING, ID_OPEN_INI, tr("menu.open_ini"))
         w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, tr("menu.reload"))
         w.AppendMenuW(m, w.MF_STRING, ID_PLUGINS, tr("menu.plugins"))
+        w.AppendMenuW(m, w.MF_STRING, ID_FORCED, tr("menu.forced"))
         w.AppendMenuW(m, w.MF_SEPARATOR, 0, None)
         w.AppendMenuW(m, w.MF_STRING, ID_EXIT, tr("menu.exit"))
         w.SetMenuDefaultItem(m, ID_SETTINGS, False)
@@ -242,6 +245,12 @@ class App:
             directory = actions.plugins_dir(config.app_dir())
             os.makedirs(directory, exist_ok=True)
             os.startfile(directory)
+        elif cmd == ID_FORCED:
+            try:
+                self.forced_words.ensure_file()
+                os.startfile(FORCED_PATH)
+            except OSError as e:
+                self.notify(tr("err.save", FORCED_PATH, e), warning=True)
         elif cmd == ID_EXIT:
             self.exit()
         elif cmd - ID_ACTION_BASE in self.actions:
@@ -371,7 +380,8 @@ class App:
     def reload_config(self):
         self.cfg = config.Config.load()
         i18n.set_language(self.cfg.language)
-        self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
+        self.ac_exceptions = autocorrect.load_words(EXCEPTIONS_PATH)
+        self.forced_words.refresh(force=True)
         failed_plugins = self._load_actions()
         self._warn_failed(self._register_hotkeys(), failed_plugins)
         self._update_raw_input()
@@ -863,6 +873,8 @@ class App:
         words = self.tracker.key(vk, down, injected, fg, hkl, own)
         if words is not None:
             self._on_word(words, fg, hkl)
+        elif self.tracker.appended:
+            self._on_typing(fg, hkl)
         self._update_raw_mouse()
         return down and not injected and vk not in kio.SIDED_MODIFIER_VKS
 
@@ -881,8 +893,29 @@ class App:
             except Exception:
                 log.exception("autocorrect failed")
         self.tracker.finished(words, correction is not None)
-        if correction is None:
+        if correction is not None:
+            self._apply_correction(correction, fg)
+
+    def _on_typing(self, fg, hkl):
+        """Слово ще набирається: якщо так починається слово зі списку «завжди у своїй
+        розкладці», виправити одразу, не чекаючи пробілу. Лише з перемиканням
+        розкладки — інакше решта слова пішла б у старій."""
+        if self._draining or not self.cfg.switch_layout:
             return
+        self.forced_words.refresh()
+        if not self.forced_words:
+            return
+        try:
+            correction = autocorrect.forced(self.tracker.keys, hkl, layouts.installed(),
+                                            self.forced_words, partial=True)
+            if correction is None or not self._can_correct(fg, hkl):
+                return
+        except Exception:
+            log.exception("autocorrect failed")
+            return
+        self._apply_correction(correction, fg)
+
+    def _apply_correction(self, correction, fg):
         # Поки ми думали, користувач міг друкувати далі: тоді передрук зіпсував би текст
         if self._drain_input():
             log.debug("autocorrect skipped: input continued")
@@ -891,7 +924,7 @@ class App:
             log.debug("autocorrect skipped: modifiers held")  # Ctrl+Backspace стер би слово
             self.tracker.reset()
             return
-        if not kio.retype(len(correction.typed) + 1, correction.fixed + " "):
+        if not kio.retype(len(correction.typed) + len(correction.tail), correction.fixed + correction.tail):
             log.warning("autocorrect: SendInput failed")
             self.tracker.reset()
             return
@@ -901,21 +934,27 @@ class App:
                   correction.src & 0xFFFFFFFF, correction.dst & 0xFFFFFFFF)
         if self.cfg.switch_layout:
             layouts.switch(fg, correction.dst)
+            if not correction.tail:
+                self.tracker.switched(correction.dst)  # слово набирається далі
         self.flash(HOTKEY_LAYOUT)
 
-    def _pick_correction(self, words, fg, hkl):
+    def _can_correct(self, fg, hkl):
         if self.busy or not fg or not hkl:
-            return None
+            return False
         pid = ctypes.c_ulong()
         w.GetWindowThreadProcessId(fg, ctypes.byref(pid))
         if pid.value == os.getpid():
-            return None  # наші власні вікна (налаштування)
+            return False  # наші власні вікна (налаштування)
         excluded = self.cfg.excluded_apps()
         if excluded and w.process_name(fg).lower() in excluded:
+            return False
+        return not eyecare.fullscreen_app()  # ігри: WASD + пробіл — не текст
+
+    def _pick_correction(self, words, fg, hkl):
+        if not self._can_correct(fg, hkl):
             return None
-        if eyecare.fullscreen_app():
-            return None  # ігри: WASD + пробіл — не текст
-        return autocorrect.choose(words, hkl, layouts.installed(), self.ac_exceptions)
+        self.forced_words.refresh()
+        return autocorrect.choose(words, hkl, layouts.installed(), self.ac_exceptions, self.forced_words)
 
     def _drain_input(self):
         """Обробити WM_INPUT, що вже чекають у черзі. True — серед них є дії користувача."""
@@ -936,7 +975,7 @@ class App:
         kio.neutralize_alt_win()
         if not kio.wait_modifiers_released(3.0):
             return
-        if not kio.retype(len(correction.fixed) + 1, correction.typed + " "):
+        if not kio.retype(len(correction.fixed) + len(correction.tail), correction.typed + correction.tail):
             return
         if self.cfg.switch_layout:
             layouts.switch(fg, correction.src)

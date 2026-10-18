@@ -28,6 +28,7 @@ _STRINGS = {
         "menu.open_ini": "Відкрити config.ini",
         "menu.reload": "Перечитати config.ini і плагіни",
         "menu.plugins": "Відкрити папку плагінів",
+        "menu.forced": "Слова, що завжди у своїй розкладці…",
         "menu.exit": "Вихід",
         # сповіщення й помилки
         "warn.hotkeys": "Не вдалося зареєструвати: %s. Змініть комбінації в налаштуваннях.",
@@ -60,6 +61,10 @@ _STRINGS = {
         # файл винятків автовиправлення
         "exceptions.header": ("# Слова, які автовиправлення розкладки не чіпає (по одному в рядку).\n"
                               "# Додаються самі, коли виправлення скасовують гарячою клавішею.\n"),
+        "forced.header": ("# Слова, які завжди набираються у своїй розкладці (по одному в рядку),\n"
+                          "# напр. позивні й коди: N01, EVAK1101. Набрані не в тій розкладці,\n"
+                          "# вони виправляються одразу, щойно зрозуміло, що це таке слово.\n"
+                          "# Великі й малі літери не розрізняються. Зміни діють без перезапуску.\n"),
         # вікно налаштувань
         "ui.hotkeys": "Гарячі клавіші",
         "ui.hk_layout": "Розкладка:",
@@ -109,6 +114,7 @@ _STRINGS = {
         "menu.open_ini": "Open config.ini",
         "menu.reload": "Reload config.ini and plugins",
         "menu.plugins": "Open plugins folder",
+        "menu.forced": "Words that keep their layout…",
         "menu.exit": "Exit",
         "warn.hotkeys": "Could not register: %s. Change the combinations in the settings.",
         "warn.plugins": "Plugins failed to load: %s (details in layout_switcher.log).",
@@ -138,6 +144,10 @@ _STRINGS = {
         "plugin.no_register": "no register(api) function",
         "exceptions.header": ("# Words that layout auto-correct leaves alone (one per line).\n"
                               "# Added automatically when a correction is undone with the hotkey.\n"),
+        "forced.header": ("# Words that are always typed in their own layout (one per line),\n"
+                          "# e.g. call signs and codes: N01, EVAK1101. Typed in the wrong layout,\n"
+                          "# they are fixed as soon as it is clear that it is such a word.\n"
+                          "# Case does not matter. Changes apply without a restart.\n"),
         "ui.hotkeys": "Hotkeys",
         "ui.hk_layout": "Layout:",
         "ui.hk_case": "Case (aA, camelCase…):",
