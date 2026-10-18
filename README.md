@@ -92,6 +92,8 @@ def register(api):
     api.text_action("upper", "UPPER CASE", str.upper, hotkey="Ctrl+Alt+U")
     # Any code: ctx.window, ctx.notify(), ctx.edit_text(), ctx.type_text()
     api.action("hello", "Say hello", lambda ctx: ctx.notify("Hello!"))
+    # Titles and texts in several languages: shown in the interface language
+    api.text_action("lower", {"uk": "малі літери", "en": "lower case"}, str.lower)
 ```
 
 - The full action id is `<file>.<id>`, e.g. `my_tools.upper`. A hotkey can be overridden or
@@ -100,6 +102,10 @@ def register(api):
   automatically.
 - Files starting with `_` are not loaded. [`plugins\_template.py`](plugins/_template.py)
   describes the whole API: copy it under a new name.
+- A title (and the text of `ctx.notify()`) is a string or a `{"uk": ..., "en": ...}`
+  dictionary. The variant in the interface language is shown (English if it is missing),
+  and it changes together with the language. `api.language` / `ctx.language` give the
+  current one (`"uk"` or `"en"`).
 - Bundled plugins: `ua_typography` (`Shift+Pause`, see above) and `lines` (sort lines,
   remove duplicates, reverse, number them; menu only).
 - After adding or changing a plugin, use **Reload config.ini and plugins** in the tray menu.
@@ -120,8 +126,16 @@ Do Not Disturb is active, or while the microphone or camera is in use (a call). 
 it waits until they end. If you step away from the computer for 5 minutes (or it sleeps),
 the countdown starts over. You can turn it on or off from the tray menu.
 
+**Work breaks.** After 2 hours of continuous work (`work_break_minutes`) a notification says
+“Ти вже 2 години без перерви” (“You've been working for 2 hours without a break”). Continuous
+work is measured from idle data: 5 minutes without keyboard or mouse input, or sleep, counts
+as a break and restarts the count. If you keep working, it reminds you again every 30 minutes.
+It follows the same quiet rules as eye breaks (fullscreen, Do Not Disturb, calls). It stays
+until Windows hides it, and it has its own icon and color so you can tell it from eye breaks.
+
 The icon is [`languages`](https://lucide.dev/icons/languages) from Lucide (ISC); the eye
-break notification uses [`hat-glasses`](https://lucide.dev/icons/hat-glasses) in a blue circle.
+break notification uses [`hat-glasses`](https://lucide.dev/icons/hat-glasses) in a blue circle, the work
+break one uses [`weight-tilde`](https://lucide.dev/icons/weight-tilde) in an orange circle.
 In the tray it adapts to the light/dark taskbar theme, turns grey when disabled, and
 briefly flashes in the action's color each time a hotkey is handled.
 
@@ -141,7 +155,7 @@ Or build the exe (see below) and run `KeyboardLayoutSwitcher.exe`.
 - **Double-click** — settings window.
 - **Right-click** — menu: **Actions** (every action with its hotkey; it runs on the window
   that was active before you clicked the tray), Enabled, Auto-correct layout while typing,
-  20-20-20 eye breaks, Settings…, Open config.ini, Reload config.ini and plugins,
+  20-20-20 eye breaks, Work break reminders, Settings…, Open config.ini, Reload config.ini and plugins,
   Open plugins folder, Exit.
 
 The app finds the previously active window through a `WinEvent` foreground notification,
@@ -149,17 +163,19 @@ which is not a keyboard hook.
 
 ## Settings
 
-The settings window has: three hotkeys and the hotkeys of plugin actions (click a field
+The settings window has: the **interface language** (Ukrainian, English, or the same as
+Windows), three hotkeys and the hotkeys of plugin actions (click a field
 and press the combination; `Backspace` clears it and turns the action off; the layout
 hotkey cannot be cleared),
 enable/disable, layout switching, reselecting converted text, auto-correct while typing
-and the programs where it is off, **start with Windows**, the copy timeout, and eye break
-reminders with their interval.
+and the programs where it is off, **start with Windows**, the copy timeout, eye break
+reminders with their interval, and work break reminders with their threshold.
 
 Everything is stored in `config.ini` next to `main.py` / the exe (created on first run):
 
 | Key               | Default  | Description |
 |-------------------|----------|-------------|
+| `language`        | `auto`   | Interface language: `uk`, `en` or `auto` (Ukrainian if Windows is in Ukrainian, otherwise English). New comments in `config.ini` are written in this language. Existing comments are kept as they are when the file is updated, and change language only when the settings are saved (the file is then rewritten). |
 | `hotkey`          | `Pause`  | Layout conversion. Combination: `Ctrl`/`Alt`/`Shift`/`Win` + key. Examples: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
 | `case_hotkey`     | `Alt+Pause` | Case change. Empty — off. |
 | `translit_hotkey` | `Ctrl+Pause` | Transliteration. Empty — off. |
@@ -172,6 +188,8 @@ Everything is stored in `config.ini` next to `main.py` / the exe (created on fir
 | `eye_breaks`      | `true`   | 20-20-20 eye break reminders. |
 | `eye_break_minutes` | `20`   | Reminder interval in minutes (1–240). |
 | `eye_break_popup_seconds` | `5` | How long the notification stays before closing itself, in seconds (0–120; `0` lets Windows decide). |
+| `work_breaks`     | `true`   | Remind to take a break after long continuous work. |
+| `work_break_minutes` | `120` | Minutes of continuous work before the reminder (15–480); then every 30 minutes. |
 
 The `[plugins]` section holds plugin hotkey overrides: `<action id> = <combination>` (an
 empty value turns the hotkey off), e.g. `lines.sort = Ctrl+Alt+S`.
@@ -250,9 +268,12 @@ better (less RAM, faster start). Use the single file when easy sharing matters m
 Resources: ~25 MB RAM in the background (onefile additionally keeps a ~10 MB bootloader
 process), plus ~10 MB for the language data when auto-correct is on. CPU use is next to
 zero: there are no keyboard hooks or polling, just `RegisterHotKey` and one timer check per
-minute for eye breaks. Raw Input is used in two cases. Keyboard events are read only while
+minute for breaks. Raw Input is used in three cases. Keyboard events are read only while
 auto-correct is on, or while a hotkey modifier is held. Mouse buttons are watched only while
-a word is being typed, since a click may move the caret. Tk is loaded only when the settings
+a word is being typed, since a click may move the caret. After 3 minutes without input, the
+app waits for the first key press or mouse movement to measure the exact length of the
+pause (only the time of that event is used), then stops listening. While you are away there
+are no events, so this costs nothing. Tk is loaded only when the settings
 window is opened for the first time.
 
 ## How it works
@@ -392,6 +413,8 @@ def register(api):
     api.text_action("upper", "ВЕЛИКІ ЛІТЕРИ", str.upper, hotkey="Ctrl+Alt+U")
     # Довільний код: ctx.window, ctx.notify(), ctx.edit_text(), ctx.type_text()
     api.action("hello", "Привітання", lambda ctx: ctx.notify("Привіт!"))
+    # Назви й тексти кількома мовами: показується мовою інтерфейсу
+    api.text_action("lower", {"uk": "малі літери", "en": "lower case"}, str.lower)
 ```
 
 - Повний ідентифікатор дії — `<файл>.<id>`, наприклад `my_tools.upper`. Гарячу клавішу можна
@@ -400,6 +423,9 @@ def register(api):
   плагіна буде підхоплено автоматично.
 - Файли, що починаються з `_`, не завантажуються. У [`plugins\_template.py`](plugins/_template.py)
   описано весь API: скопіюйте його під новим ім'ям.
+- Назва (і текст `ctx.notify()`) — рядок або словник `{"uk": ..., "en": ...}`. Показується
+  варіант мовою інтерфейсу (якщо його немає — англійський), і він змінюється разом із
+  мовою. Поточну мову дають `api.language` / `ctx.language` (`"uk"` або `"en"`).
 - Плагіни в комплекті: `ua_typography` (`Shift+Pause`, див. вище) і `lines` (упорядкувати
   рядки, прибрати повтори, розвернути, пронумерувати; лише з меню).
 - Після додавання чи зміни плагіна — меню трею **Перечитати config.ini і плагіни**. Якщо
@@ -420,8 +446,17 @@ def register(api):
 нагадування чекає, доки це закінчиться. Якщо ви відійшли від комп'ютера на 5 хвилин (або
 він спав), відлік починається заново. Вмикається й вимикається в меню трею.
 
+**Перерви в роботі.** Після 2 годин безперервної роботи (`work_break_minutes`) сповіщення
+нагадує: «Ти вже 2 години без перерви». Безперервну роботу визначаємо за даними про
+бездіяльність: 5 хвилин без клавіатури й миші (або сон комп'ютера) вважаються перервою, і
+відлік починається заново. Якщо перерви так і не було, нагадування повторюється кожні
+30 хвилин. Правила тиші ті самі, що й для очей (повноекранний режим, «Не турбувати»,
+дзвінки). Саме не закривається (лише як вирішить Windows) і має власну іконку й колір,
+щоб не плутати з нагадуванням для очей.
+
 Іконка сповіщення про перерву — [`hat-glasses`](https://lucide.dev/icons/hat-glasses)
-з Lucide (ISC) у синьому колі.
+з Lucide (ISC) у синьому колі, про перерву в роботі —
+[`weight-tilde`](https://lucide.dev/icons/weight-tilde) у помаранчевому колі.
 
 Іконка програми — [`languages`](https://lucide.dev/icons/languages) з Lucide (ISC),
 в треї підлаштовується під світлу/темну тему панелі задач, сіра — коли вимкнено,
@@ -443,7 +478,7 @@ def register(api):
 - **Подвійний клік** — вікно налаштувань.
 - **Правий клік** — меню: **Дії** (усі дії з гарячими клавішами; виконуються для вікна,
   яке було активним до кліку по треї), Увімкнено, Автовиправлення розкладки під час набору,
-  Нагадування 20-20-20, Налаштування…, Відкрити config.ini, Перечитати config.ini і плагіни,
+  Нагадування 20-20-20, Нагадування про перерву в роботі, Налаштування…, Відкрити config.ini, Перечитати config.ini і плагіни,
   Відкрити папку плагінів, Вихід.
 
 Попереднє активне вікно програма визначає через сповіщення `WinEvent` про зміну активного
@@ -451,17 +486,19 @@ def register(api):
 
 ## Налаштування
 
-Вікно налаштувань: три гарячі клавіші й гарячі клавіші дій з плагінів (клацніть у поле
+Вікно налаштувань: **мова інтерфейсу** (українська, англійська або як у Windows), три
+гарячі клавіші й гарячі клавіші дій з плагінів (клацніть у поле
 й натисніть комбінацію; `Backspace` очищує клавішу й вимикає дію; клавішу розкладки
 очистити не можна),
 увімкнення, перемикання розкладки, повторне виділення, автовиправлення під час набору
 і програми, де воно вимкнене, **запуск разом з Windows**, затримка очікування копіювання,
-нагадування для очей та їхній інтервал.
+нагадування для очей та їхній інтервал, нагадування про перерву в роботі та його поріг.
 
 Усе зберігається в `config.ini` поруч із `main.py` / exe (створюється при першому запуску):
 
 | Ключ              | За замовчуванням | Опис |
 |-------------------|------------------|------|
+| `language`        | `auto`           | Мова інтерфейсу: `uk`, `en` або `auto` (українська, якщо Windows українською, інакше англійська). Нові коментарі в `config.ini` пишуться цією мовою. Наявні коментарі під час оновлення файлу лишаються як є і змінюють мову лише після збереження налаштувань (тоді файл перезаписується). |
 | `hotkey`          | `Pause`          | Конвертація розкладки. Комбінація: `Ctrl`/`Alt`/`Shift`/`Win` + клавіша. Приклади: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
 | `case_hotkey`     | `Alt+Pause`      | Зміна регістру. Порожньо — вимкнено. |
 | `translit_hotkey` | `Ctrl+Pause`     | Транслітерація. Порожньо — вимкнено. |
@@ -474,6 +511,8 @@ def register(api):
 | `eye_breaks`      | `true`           | Нагадування 20-20-20 для очей. |
 | `eye_break_minutes` | `20`           | Інтервал нагадувань, хв (1–240). |
 | `eye_break_popup_seconds` | `5`      | Через скільки секунд сповіщення закривається само (0–120; `0` — як вирішить Windows). |
+| `work_breaks`     | `true`           | Нагадування про перерву після тривалої безперервної роботи. |
+| `work_break_minutes` | `120`         | Скільки хвилин безперервної роботи до нагадування (15–480); далі — кожні 30 хв. |
 
 У секції `[plugins]` зберігаються перевизначення гарячих клавіш плагінів:
 `<id дії> = <комбінація>` (порожнє значення вимикає клавішу), наприклад
@@ -551,9 +590,12 @@ CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, д
 Ресурси: у фоні ~25 MB RAM (onefile додатково тримає процес-завантажувач ~10 MB), плюс
 ~10 MB на мовні дані, коли автовиправлення увімкнене. Процесор майже не навантажується:
 жодних хуків клавіатури чи опитування, лише `RegisterHotKey` й одна перевірка таймера на
-хвилину для перерв. Raw Input задіяний у двох випадках. Події клавіатури читаються лише
+хвилину для перерв. Raw Input задіяний у трьох випадках. Події клавіатури читаються лише
 поки увімкнене автовиправлення або утримується модифікатор гарячої клавіші. Кнопки миші
-відстежуються тільки поки набирається слово, бо клік може зсунути курсор.
+відстежуються тільки поки набирається слово, бо клік може зсунути курсор. Після 3 хвилин
+без введення програма чекає на перше натискання чи рух миші, щоб точно виміряти тривалість
+паузи (береться лише час цієї події), і одразу перестає слухати. Поки вас немає, подій
+немає, тож це нічого не коштує.
 Tk підвантажується тільки при першому відкритті налаштувань.
 
 ## Як це працює

@@ -14,6 +14,7 @@ import os
 import sys
 
 import layouts
+from i18n import tr
 
 log = logging.getLogger("kls")
 
@@ -175,8 +176,7 @@ def add_exception(path, word):
     new = not os.path.exists(path)
     with open(path, "a", encoding="utf-8") as f:
         if new:
-            f.write("# Слова, які автовиправлення розкладки не чіпає (по одному в рядку).\n"
-                    "# Додаються самі, коли виправлення скасовують гарячою клавішею.\n")
+            f.write(tr("exceptions.header"))
         f.write(word + "\n")
 
 

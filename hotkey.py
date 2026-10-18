@@ -2,6 +2,7 @@
 import re
 
 import winapi as w
+from i18n import tr
 
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
 VK_CANCEL, VK_PAUSE = 0x03, 0x13
@@ -32,12 +33,12 @@ def parse(text):
     """'Ctrl+Shift+F12' -> (mods, vk). Кидає ValueError для некоректного рядка."""
     parts = [p.strip() for p in text.split("+")]
     if not parts or any(not p for p in parts):
-        raise ValueError("порожня частина в «%s»" % text)
+        raise ValueError(tr("hotkey.empty_part", text))
     *mod_parts, key = parts
     mods = 0
     for p in mod_parts:
         if p.lower() not in _MOD_ALIASES:
-            raise ValueError("невідомий модифікатор «%s»" % p)
+            raise ValueError(tr("hotkey.bad_modifier", p))
         mods |= _MOD_ALIASES[p.lower()]
     k = key.lower()
     if k in _BY_NAME:
@@ -45,7 +46,7 @@ def parse(text):
     m = re.fullmatch(r"vk([0-9a-f]{2})", k)
     if m:
         return mods, int(m.group(1), 16)
-    raise ValueError("невідома клавіша «%s»" % key)
+    raise ValueError(tr("hotkey.bad_key", key))
 
 
 def format(mods, vk):

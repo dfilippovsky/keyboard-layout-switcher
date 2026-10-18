@@ -40,5 +40,6 @@ def typography(text):
 
 
 def register(api):
-    api.text_action("fix", "Українська типографіка («», ʼ, —)", typography, hotkey="Shift+Pause",
+    api.text_action("fix", {"uk": "Українська типографіка («», ʼ, —)",
+                            "en": "Ukrainian typography («», ʼ, —)"}, typography, hotkey="Shift+Pause",
                     color=(0xEC, 0x48, 0x99))

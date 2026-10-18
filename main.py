@@ -13,6 +13,8 @@ import actions
 import autocorrect
 import config
 import eyecare
+import i18n
+from i18n import tr
 import hotkey as hk
 import icon
 import keyboard_io as kio
@@ -26,11 +28,11 @@ log = logging.getLogger("kls")
 
 # Дії. Номер дії — це й id її гарячої клавіші: вбудовані 1–3, плагіни з _PLUGIN_BASE.
 HOTKEY_LAYOUT, HOTKEY_CASE, HOTKEY_TRANSLIT = 1, 2, 3
-# номер -> (ключ, поле config з гарячою клавішею, назва, колір у треї)
+# номер -> (ключ, поле config з гарячою клавішею, ключ назви в i18n, колір у треї)
 _BUILTIN = {
-    HOTKEY_LAYOUT: ("layout", "hotkey", "Розкладка", icon.FLASH_COLOR),
-    HOTKEY_CASE: ("case", "case_hotkey", "Регістр", icon.CASE_FLASH_COLOR),
-    HOTKEY_TRANSLIT: ("translit", "translit_hotkey", "Транслітерація", icon.TRANSLIT_FLASH_COLOR),
+    HOTKEY_LAYOUT: ("layout", "hotkey", "action.layout", icon.FLASH_COLOR),
+    HOTKEY_CASE: ("case", "case_hotkey", "action.case", icon.CASE_FLASH_COLOR),
+    HOTKEY_TRANSLIT: ("translit", "translit_hotkey", "action.translit", icon.TRANSLIT_FLASH_COLOR),
 }
 _BUILTIN_FIELDS = {key: field for key, field, _, _ in _BUILTIN.values()}
 _PLUGIN_BASE = 100
@@ -43,7 +45,8 @@ _FOCUS_TIMEOUT = 1.0   # с — чекати, поки вікно знову с�
 _HOLD_TIMEOUT = 10.0   # с без натискань — завершити утримання
 _FLASH_MS = 350          # скільки іконка в треї світиться кольором дії після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
-ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS = range(100, 108)
+(ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS,
+ ID_WORK) = range(100, 109)
 ID_ACTION_BASE = 1000    # пункт меню «Дії» = ID_ACTION_BASE + номер дії
 # Вікна, які не є «робочими»: панель задач, область сповіщень, робочий стіл
 _SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
@@ -71,6 +74,7 @@ def _abort(reason):
 class App:
     def __init__(self):
         self.cfg = config.Config.load()
+        i18n.set_language(self.cfg.language)
         self.busy = False
         self.hotkey_ok = False
         self.registered = {}     # дія -> (mods, vk) — лише комбінації, що справді зареєстровані
@@ -81,11 +85,15 @@ class App:
         self.flashing = None     # колір, яким зараз світиться іконка
         self.actions = {}        # номер -> actions.Action
         self.case_cycler = textcase.CaseCycler()
+        self.away = eyecare.BreakDetector()
         self.eyes = eyecare.EyeBreaks()
         self.eye_icon = None
+        self.work = eyecare.WorkBreaks()
+        self.work_icon = None
         self.tracker = autocorrect.Tracker()
         self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
         self.raw = {_RAW_KEYBOARD: False, _RAW_MOUSE: False}  # що зараз зареєстровано в Raw Input
+        self.ac_tracking = False  # автовиправлення стежить за клавіатурою (Raw Input — ще й для перерв)
         self._raw_buf = (ctypes.c_byte * 64)()  # з запасом: RAWINPUT більший за заголовок + дані
         self._draining = False
 
@@ -117,9 +125,9 @@ class App:
     def _tooltip(self):
         tip = "Keyboard Layout Switcher — " + self.cfg.hotkey
         if not self.cfg.enabled:
-            tip += " (вимкнено)"
+            tip += tr("tray.disabled")
         elif not self.hotkey_ok:
-            tip += " (клавіша зайнята)"
+            tip += tr("tray.busy")
         return tip[:127]
 
     def _tray(self, action, info=None, warning=False, title=None, quiet=False, balloon_icon=None):
@@ -182,20 +190,22 @@ class App:
             if action.menu:
                 text = self.hotkey_text(action)
                 w.AppendMenuW(sub, w.MF_STRING, ID_ACTION_BASE + num,
-                              action.title + ("\t" + text if text else ""))
-        w.AppendMenuW(m, w.MF_POPUP, sub, "Дії")
+                              action.label + ("\t" + text if text else ""))
+        w.AppendMenuW(m, w.MF_POPUP, sub, tr("menu.actions"))
         w.AppendMenuW(m, w.MF_SEPARATOR, 0, None)
-        w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.enabled else 0), ID_ENABLED, "Увімкнено")
+        w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.enabled else 0), ID_ENABLED, tr("menu.enabled"))
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.autocorrect else 0), ID_AUTOCORRECT,
-                      "Автовиправлення розкладки під час набору")
+                      tr("menu.autocorrect"))
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.eye_breaks else 0), ID_EYES,
-                      "Нагадування 20-20-20 для очей")
-        w.AppendMenuW(m, w.MF_STRING, ID_SETTINGS, "Налаштування…")
-        w.AppendMenuW(m, w.MF_STRING, ID_OPEN_INI, "Відкрити config.ini")
-        w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, "Перечитати config.ini і плагіни")
-        w.AppendMenuW(m, w.MF_STRING, ID_PLUGINS, "Відкрити папку плагінів")
+                      tr("menu.eyes"))
+        w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.work_breaks else 0), ID_WORK,
+                      tr("menu.work"))
+        w.AppendMenuW(m, w.MF_STRING, ID_SETTINGS, tr("menu.settings"))
+        w.AppendMenuW(m, w.MF_STRING, ID_OPEN_INI, tr("menu.open_ini"))
+        w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, tr("menu.reload"))
+        w.AppendMenuW(m, w.MF_STRING, ID_PLUGINS, tr("menu.plugins"))
         w.AppendMenuW(m, w.MF_SEPARATOR, 0, None)
-        w.AppendMenuW(m, w.MF_STRING, ID_EXIT, "Вихід")
+        w.AppendMenuW(m, w.MF_STRING, ID_EXIT, tr("menu.exit"))
         w.SetMenuDefaultItem(m, ID_SETTINGS, False)
         pt = w.POINT()
         w.GetCursorPos(ctypes.byref(pt))
@@ -218,6 +228,10 @@ class App:
             self.cfg.eye_breaks = not self.cfg.eye_breaks
             self.cfg.save()
             self.eyes.reset()
+        elif cmd == ID_WORK:
+            self.cfg.work_breaks = not self.cfg.work_breaks
+            self.cfg.save()
+            self.work.reset()
         elif cmd == ID_SETTINGS:
             self.open_settings()
         elif cmd == ID_OPEN_INI:
@@ -260,7 +274,7 @@ class App:
         steps = {HOTKEY_LAYOUT: self._convert_layout, HOTKEY_CASE: self._toggle_case,
                  HOTKEY_TRANSLIT: self._transliterate}
         for num, (key, _field, title, color) in _BUILTIN.items():
-            registry.add(actions.Action(key, title, steps[num], color=color, num=num))
+            registry.add(actions.Action(key, i18n.translations(title), steps[num], color=color, num=num))
         failed = actions.load_plugins(registry, actions.plugins_dir(config.app_dir()), self)
         for i, action in enumerate(registry.plugin_actions()):
             action.num = _PLUGIN_BASE + i
@@ -336,7 +350,7 @@ class App:
             if self._register(num, text):
                 self.registered[num] = hk.parse(text)
             else:
-                failed.append(text if num in _BUILTIN else "%s (%s)" % (text, action.title))
+                failed.append(text if num in _BUILTIN else "%s (%s)" % (text, action.label))
                 if num == HOTKEY_LAYOUT:
                     self.hotkey_ok = False
         # Натискання гарячої клавіші розкладки не скасовує можливість скасувати автовиправлення
@@ -348,16 +362,15 @@ class App:
     def _warn_failed(self, failed, failed_plugins=()):
         parts = []
         if failed:
-            parts.append("Не вдалося зареєструвати: %s. Змініть комбінації в налаштуваннях."
-                         % ", ".join("«%s»" % t for t in failed))
+            parts.append(tr("warn.hotkeys", ", ".join("«%s»" % t for t in failed)))
         if failed_plugins:
-            parts.append("Не завантажилися плагіни: %s (подробиці в layout_switcher.log)."
-                         % "; ".join("%s — %s" % item for item in failed_plugins))
+            parts.append(tr("warn.plugins", "; ".join("%s — %s" % item for item in failed_plugins)))
         if parts:
             self.notify(" ".join(parts), warning=True)
 
     def reload_config(self):
         self.cfg = config.Config.load()
+        i18n.set_language(self.cfg.language)
         self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
         failed_plugins = self._load_actions()
         self._warn_failed(self._register_hotkeys(), failed_plugins)
@@ -394,7 +407,7 @@ class App:
             try:
                 config.set_autostart(autostart)
             except OSError as e:
-                return "Не вдалося змінити автозапуск: %s" % e
+                return tr("err.autostart", e)
         backup = dataclasses.replace(self.cfg)
         for key, value in values.items():
             setattr(self.cfg, key, value)
@@ -407,7 +420,8 @@ class App:
                     config.set_autostart(old_autostart)
                 except OSError:
                     log.exception("autostart rollback failed")
-            return "Не вдалося зберегти %s: %s" % (config.CONFIG_PATH, e)
+            return tr("err.save", config.CONFIG_PATH, e)
+        i18n.set_language(self.cfg.language)
         self.eyes.reset()
         self.refresh_tray()
         self._update_raw_input()
@@ -425,14 +439,13 @@ class App:
                 try:
                     mods, vk = hk.parse(text)
                 except ValueError as e:
-                    return "Некоректна гаряча клавіша «%s»: %s" % (text, e)
+                    return tr("err.hotkey", text, e)
                 key = (mods, hk.normalize_vk(vk))
                 if key in seen:
-                    return "Комбінацію «%s» призначено двом діям." % text
+                    return tr("err.hotkey_twice", text)
                 seen.add(key)
                 if not self._register(action, text):
-                    return ("Комбінацію «%s» не вдалося зареєструвати — можливо, її вже використовує "
-                            "інша програма або система." % text)
+                    return tr("err.hotkey_taken", text)
             return None
         finally:
             self._unregister_hotkeys()
@@ -467,8 +480,8 @@ class App:
         except Exception as e:
             log.exception("action %s failed", self.actions[action].key)
             if self.actions[action].plugin:
-                self.notify("Помилка в дії «%s» (плагін %s): %s" % (
-                    self.actions[action].title, self.actions[action].plugin, e), warning=True)
+                self.notify(tr("err.action", self.actions[action].label, self.actions[action].plugin, e),
+                            warning=True)
         finally:
             self.busy = False
             # Події модифікаторів під час дії міг забрати PhysicalKeys.poll(), а свої
@@ -493,7 +506,7 @@ class App:
         keys = None
         if groups:
             try:
-                keys = kio.PhysicalKeys(self.hwnd, keep=self.raw[_RAW_KEYBOARD])
+                keys = kio.PhysicalKeys(self.hwnd, keep=self.ac_tracking)
             except OSError:
                 log.exception("raw input is unavailable")
         try:
@@ -793,26 +806,34 @@ class App:
             log.warning("RegisterRawInputDevices(%#x, %s) failed: %d", usage, on, ctypes.get_last_error())
 
     def _update_raw_input(self):
-        """Стежити за клавіатурою, лише поки автовиправлення увімкнене."""
+        """Стежити за клавіатурою, поки автовиправлення увімкнене (і поки чекаємо на
+        повернення користувача після бездіяльності — див. _watch_away)."""
         on = self.cfg.enabled and self.cfg.autocorrect
-        if on != self.raw[_RAW_KEYBOARD]:
+        if on != self.ac_tracking:
+            self.ac_tracking = on
             self.tracker.reset()
             self.tracker.caps = None  # поки не стежили, Caps Lock могли перемкнути
         if on:  # мовні дані — заздалегідь, щоб перше виправлення не барилося
             for hkl in layouts.installed():
                 autocorrect.model(autocorrect.lang_of(hkl))
-        self._set_raw(_RAW_KEYBOARD, on)
+        self._set_raw(_RAW_KEYBOARD, on or self.away.watching is not None)
         self._update_raw_mouse()
 
     def _update_raw_mouse(self):
         """Клік мишею може перенести курсор, тож поки є набране слово (або виправлення,
         яке можна скасувати), стежимо й за кнопками миші. Решту часу — ні: рух миші
-        дає сотні подій за секунду."""
-        self._set_raw(_RAW_MOUSE, self.raw[_RAW_KEYBOARD] and self.tracker.active)
+        дає сотні подій за секунду (крім очікування повернення користувача — тоді
+        подій немає, а перша ж знімає підписку)."""
+        self._set_raw(_RAW_MOUSE, (self.ac_tracking and self.tracker.active)
+                      or self.away.watching is not None)
 
     def _on_raw_input(self, lparam):
         """Обробити WM_INPUT. Повертає True, якщо це дія користувача, після якої
         передруковувати вже не можна (натиснуто клавішу або кнопку миші)."""
+        if self.away.watching is not None:
+            self._on_return(w.GetMessageTime())
+        if not self.ac_tracking:
+            return False  # підписка лише заради перерв (або запізніла подія після неї)
         buf = self._raw_buf
         size = ctypes.c_uint(ctypes.sizeof(buf))
         got = w.GetRawInputData(lparam, w.RID_INPUT, buf, ctypes.byref(size),
@@ -926,23 +947,77 @@ class App:
             except OSError:
                 log.exception("cannot save autocorrect exception")
 
-    # ---------- нагадування 20-20-20 ----------
+    # ---------- нагадування 20-20-20 і про перерву ----------
 
     def _eye_tick(self):
+        self._check_away()
+        worked = None
+        if self.cfg.work_breaks:
+            worked = self.work.tick(self.cfg.work_break_minutes)
+        else:
+            self.work.reset()
         if not self.cfg.eye_breaks:
             self.eyes.reset()
-            return
-        if self.eyes.tick(self.cfg.eye_break_minutes):
+        elif self.eyes.tick(self.cfg.eye_break_minutes) and worked is None:
             self.show_eye_break()
+        if worked is not None:
+            self.eyes.reset()  # перерва в роботі — заразом і для очей
+            self.show_work_break(worked)
+
+    def _check_away(self):
+        """Перерва (5 хв без введення або сон) — відлік обох нагадувань заново. Щоб не
+        пропустити паузу, яка закінчиться між перевірками, після 3 хв бездіяльності
+        чекаємо на перше введення (_watch_away)."""
+        if self.away.observe():
+            self._took_break()
+        if self.away.watching is not None:
+            stale = self.away.stale()
+            if stale is not None:  # введення пройшло повз підписку (сенсорний екран, перо)
+                self._on_return(stale)
+        elif (self.cfg.eye_breaks or self.cfg.work_breaks) and self.away.should_watch():
+            self._watch_away()
+
+    def _took_break(self):
+        self.eyes.reset()
+        self.work.reset()
+
+    def _watch_away(self):
+        """Підписатися на Raw Input клавіатури й миші, поки користувача немає: перше
+        введення прийде повідомленням з часом, коли воно сталося."""
+        if not self.away.watch():
+            return
+        self._update_raw_input()
+        if not (self.raw[_RAW_KEYBOARD] and self.raw[_RAW_MOUSE]):
+            self.away.stop()  # не вдалося — лишається щохвилинна перевірка
+            self._update_raw_input()
+            return
+        stale = self.away.stale()
+        if stale is not None:  # повернувся, поки ми підписувалися
+            self._on_return(stale)
+
+    def _on_return(self, input_tick):
+        """Перше введення після бездіяльності: пауза ≥ 5 хв — перерва. Підписку
+        повертаємо до тієї, що потрібна автовиправленню."""
+        if self.away.returned(input_tick):
+            log.debug("break detected on return")
+            self._took_break()
+        self._update_raw_input()
 
     def show_eye_break(self):
         if not self.eye_icon:  # велика іконка сповіщення — малюється при першому показі
             self.eye_icon = icon.create_eye_break_hicon(w.GetSystemMetrics(w.SM_CXICON) or 32)
-        self.notify("Подивіться 20 секунд на щось далеко (≈6 м) - очі відпочинуть.",
-                    title="Перерва для очей", quiet=True, balloon_icon=self.eye_icon)
+        self.notify(tr("eye.text"), title=tr("eye.title"), quiet=True, balloon_icon=self.eye_icon)
         # Тайм-аут у NOTIFYICONDATA Windows ігнорує, тож закриваємо самі
         if self.cfg.eye_break_popup_seconds:
             w.SetTimer(self.hwnd, EYE_HIDE_TIMER_ID, self.cfg.eye_break_popup_seconds * 1000, None)
+
+    def show_work_break(self, worked):
+        if not self.work_icon:
+            self.work_icon = icon.create_work_break_hicon(w.GetSystemMetrics(w.SM_CXICON) or 32)
+        # Не закриваємо самі (як нагадування для очей) — його легко пропустити
+        w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)
+        self.notify(tr("work.text", i18n.format_duration(worked)),
+                    title=tr("work.title"), quiet=True, balloon_icon=self.work_icon)
 
     def _hide_eye_break(self):
         w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)
@@ -955,6 +1030,8 @@ class App:
             if msg == w.WM_INPUT:
                 self._on_raw_input(lparam)  # далі DefWindowProc — так вимагає Raw Input
             elif msg == w.WM_HOTKEY and wparam % _HOTKEY_ALIAS in self.actions:
+                if self.away.watching is not None:  # раніше, ніж PhysicalKeys забере WM_INPUT
+                    self._on_return(w.GetMessageTime())
                 self.on_hotkey(wparam % _HOTKEY_ALIAS)
                 return 0
             if msg == w.WM_TIMER and wparam == FLASH_TIMER_ID:
@@ -1012,8 +1089,8 @@ def main():
     _setup_logging()
     mutex = w.CreateMutexW(None, False, "Local\\KeyboardLayoutSwitcher.SingleInstance")
     if ctypes.get_last_error() == w.ERROR_ALREADY_EXISTS:
-        w.MessageBoxW(None, "Keyboard Layout Switcher вже запущено (дивіться трей).",
-                      "Keyboard Layout Switcher", 0x40)
+        i18n.set_language(config.Config.load().language)
+        w.MessageBoxW(None, tr("already_running"), "Keyboard Layout Switcher", 0x40)
         return
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)

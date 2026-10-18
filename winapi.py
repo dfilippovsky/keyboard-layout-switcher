@@ -165,6 +165,8 @@ SetForegroundWindow = _f(user32, "SetForegroundWindow", W.BOOL, W.HWND)
 GetForegroundWindow = _f(user32, "GetForegroundWindow", W.HWND)
 GetWindowThreadProcessId = _f(user32, "GetWindowThreadProcessId", W.DWORD, W.HWND, ctypes.POINTER(W.DWORD))
 GetSystemMetrics = _f(user32, "GetSystemMetrics", ctypes.c_int, ctypes.c_int)
+SystemParametersInfoW = _f(user32, "SystemParametersInfoW", W.BOOL, W.UINT, W.UINT, W.LPVOID, W.UINT)
+SPI_GETWORKAREA = 0x0030
 MessageBoxW = _f(user32, "MessageBoxW", ctypes.c_int, W.HWND, W.LPCWSTR, W.LPCWSTR, W.UINT)
 MessageBeep = _f(user32, "MessageBeep", W.BOOL, W.UINT)
 CreateIconFromResourceEx = _f(user32, "CreateIconFromResourceEx", W.HICON, W.LPVOID, W.DWORD, W.BOOL,
@@ -186,6 +188,7 @@ SendInput = _f(user32, "SendInput", W.UINT, W.UINT, ctypes.POINTER(INPUT), ctype
 GetAsyncKeyState = _f(user32, "GetAsyncKeyState", W.SHORT, ctypes.c_int)
 GetKeyState = _f(user32, "GetKeyState", W.SHORT, ctypes.c_int)
 GetLastInputInfo = _f(user32, "GetLastInputInfo", W.BOOL, ctypes.POINTER(LASTINPUTINFO))
+GetMessageTime = _f(user32, "GetMessageTime", W.LONG)
 RegisterRawInputDevices = _f(user32, "RegisterRawInputDevices", W.BOOL, ctypes.POINTER(RAWINPUTDEVICE),
                              W.UINT, W.UINT)
 GetRawInputData = _f(user32, "GetRawInputData", W.UINT, W.HANDLE, W.UINT, W.LPVOID,
@@ -226,6 +229,14 @@ QueryFullProcessImageNameW = _f(kernel32, "QueryFullProcessImageNameW", W.BOOL, 
 Shell_NotifyIconW = _f(shell32, "Shell_NotifyIconW", W.BOOL, W.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
 SHQueryUserNotificationState = _f(shell32, "SHQueryUserNotificationState", ctypes.c_long,
                                   ctypes.POINTER(ctypes.c_int))
+
+
+def work_area():
+    """Робоча область основного монітора (без панелі задач): (left, top, right, bottom)."""
+    r = W.RECT()
+    if SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(r), 0):
+        return r.left, r.top, r.right, r.bottom
+    return 0, 0, GetSystemMetrics(0), GetSystemMetrics(1)
 
 
 def class_name(hwnd):

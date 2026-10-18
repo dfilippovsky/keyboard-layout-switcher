@@ -21,10 +21,15 @@ id — малі латинські літери, цифри, «_» і «-». П�
 config.ini (порожнє значення — вимкнути). hotkey — як у config.ini: «Ctrl+Alt+U»,
 «Shift+F12» тощо. color — (r, g, b), яким блимне іконка в треї.
 
+title (і текст для ctx.notify) — рядок або словник {"uk": ..., "en": ...}: показується
+варіант мовою інтерфейсу (якщо його немає — англійський). api.language і ctx.language —
+поточна мова інтерфейсу ("uk" або "en").
+
 api.log — логер (пише в layout_switcher.log).
 """
 
 
 def register(api):
-    api.text_action("upper", "ВЕЛИКІ ЛІТЕРИ", str.upper)
-    api.action("hello", "Привітання", lambda ctx: ctx.notify("Привіт від плагіна!"))
+    api.text_action("upper", {"uk": "ВЕЛИКІ ЛІТЕРИ", "en": "UPPER CASE"}, str.upper)
+    api.action("hello", {"uk": "Привітання", "en": "Greeting"},
+               lambda ctx: ctx.notify({"uk": "Привіт від плагіна!", "en": "Hello from a plugin!"}))

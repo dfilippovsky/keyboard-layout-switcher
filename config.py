@@ -7,6 +7,8 @@ import sys
 import winreg
 from dataclasses import dataclass, asdict, field
 
+import i18n
+
 APP_NAME = "KeyboardLayoutSwitcher"
 
 
@@ -18,11 +20,14 @@ def app_dir():
 
 CONFIG_PATH = os.path.join(app_dir(), "config.ini")
 
-_TEMPLATE = """\
+_TEMPLATES = {
+    "uk": """\
 ; Keyboard Layout Switcher — налаштування.
 ; Можна редагувати вручну, після чого в меню трею вибрати «Перечитати config.ini».
 
 [general]
+; Мова інтерфейсу: auto (як у Windows), uk, en
+language = {language}
 ; Гаряча клавіша конвертації розкладки: Ctrl/Alt/Shift/Win + клавіша.
 ; Приклади: Pause, Shift+Pause, Ctrl+Alt+Space, Alt+F12
 hotkey = {hotkey}
@@ -50,13 +55,67 @@ eye_breaks = {eye_breaks}
 eye_break_minutes = {eye_break_minutes}
 ; Через скільки секунд сповіщення закривається само (0 — як вирішить Windows)
 eye_break_popup_seconds = {eye_break_popup_seconds}
-"""
+; Нагадування про перерву після тривалої роботи без перерви (true/false).
+; Перервою вважається 5 хв без клавіатури й миші або сон комп'ютера.
+work_breaks = {work_breaks}
+; Скільки хвилин безперервної роботи до нагадування (15–480); далі — кожні 30 хв
+work_break_minutes = {work_break_minutes}
+""",
+    "en": """\
+; Keyboard Layout Switcher — settings.
+; You can edit them by hand, then choose “Reload config.ini and plugins” in the tray menu.
 
-_PLUGINS_HEADER = """
+[general]
+; Interface language: auto (same as Windows), uk, en
+language = {language}
+; Layout conversion hotkey: Ctrl/Alt/Shift/Win + key.
+; Examples: Pause, Shift+Pause, Ctrl+Alt+Space, Alt+F12
+hotkey = {hotkey}
+; Case cycling: lower → UPPER → Title → camelCase → snake_case → kebab-case
+; (empty — off)
+case_hotkey = {case_hotkey}
+; Transliteration of Ukrainian text into Latin letters (empty — off)
+translit_hotkey = {translit_hotkey}
+; React to the hotkeys (true/false)
+enabled = {enabled}
+; After converting, switch the active window's layout to the target one
+switch_layout = {switch_layout}
+; Auto-correct while typing: a word typed in the wrong layout (ghbdsn) becomes the right
+; one (привіт) after a space. To undo, press the layout hotkey right away.
+autocorrect = {autocorrect}
+; Programs where auto-correct is off, separated by commas (exe name), e.g.: WindowsTerminal.exe, code.exe
+autocorrect_exclude = {autocorrect_exclude}
+; After converting selected text, select it again (pressing again gives the next layout)
+reselect = {reselect}
+; How long to wait (ms) for the program to copy text to the clipboard after Ctrl+C
+copy_timeout_ms = {copy_timeout_ms}
+; 20-20-20 reminders: every N minutes look into the distance (true/false)
+eye_breaks = {eye_breaks}
+; Reminder interval, min (1–240)
+eye_break_minutes = {eye_break_minutes}
+; After how many seconds the notification closes by itself (0 — let Windows decide)
+eye_break_popup_seconds = {eye_break_popup_seconds}
+; Remind to take a break after long work without one (true/false).
+; A break is 5 min without keyboard and mouse, or the computer sleeping.
+work_breaks = {work_breaks}
+; Minutes of continuous work before the reminder (15–480); then every 30 min
+work_break_minutes = {work_break_minutes}
+""",
+}
+
+_PLUGINS_HEADERS = {
+    "uk": """
 [plugins]
 ; Гарячі клавіші дій з плагінів (plugins\\*.py): id дії = комбінація; порожньо — вимкнено.
 ; Дії, яких тут немає, використовують комбінацію, яку задав сам плагін.
-"""
+""",
+    "en": """
+[plugins]
+; Hotkeys of plugin actions (plugins\\*.py): action id = combination; empty — off.
+; Actions not listed here use the combination set by the plugin itself.
+""",
+}
+LANGUAGE_SETTINGS = ("auto",) + i18n.LANGUAGES
 
 HOTKEY_FIELDS = ("hotkey", "case_hotkey", "translit_hotkey")
 _SECTION_RE = re.compile(r"\[(?P<name>.+)\]$")
@@ -75,6 +134,7 @@ def _section_name(line):
 
 @dataclass
 class Config:
+    language: str = "auto"       # auto | uk | en
     hotkey: str = "Pause"
     case_hotkey: str = "Alt+Pause"
     translit_hotkey: str = "Ctrl+Pause"
@@ -87,6 +147,8 @@ class Config:
     eye_breaks: bool = True
     eye_break_minutes: int = 20
     eye_break_popup_seconds: int = 5
+    work_breaks: bool = True
+    work_break_minutes: int = 120
     # Секція [plugins]: id дії плагіна -> комбінація (перевизначає ту, що задав плагін)
     plugin_hotkeys: dict = field(default_factory=dict)
 
@@ -102,15 +164,17 @@ class Config:
         cp.read(path, encoding="utf-8-sig")
         sec = cp["general"] if cp.has_section("general") else {}
         cfg.hotkey = sec.get("hotkey", cfg.hotkey).strip() or cfg.hotkey
+        language = sec.get("language", cfg.language).strip().lower()
+        cfg.language = language if language in LANGUAGE_SETTINGS else cfg.language
         for key in ("case_hotkey", "translit_hotkey", "autocorrect_exclude"):  # порожнє = вимкнено / нічого
             setattr(cfg, key, sec.get(key, getattr(cfg, key)).strip())
-        for key in ("enabled", "switch_layout", "autocorrect", "reselect", "eye_breaks"):
+        for key in ("enabled", "switch_layout", "autocorrect", "reselect", "eye_breaks", "work_breaks"):
             try:
                 setattr(cfg, key, cp.getboolean("general", key, fallback=getattr(cfg, key)))
             except ValueError:
                 pass
         for key, lo, hi in (("copy_timeout_ms", 50, 5000), ("eye_break_minutes", 1, 240),
-                            ("eye_break_popup_seconds", 0, 120)):
+                            ("eye_break_popup_seconds", 0, 120), ("work_break_minutes", 15, 480)):
             try:
                 setattr(cfg, key, max(lo, min(hi, cp.getint("general", key, fallback=getattr(cfg, key)))))
             except ValueError:
@@ -133,9 +197,10 @@ class Config:
         return {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in asdict(self).items()}
 
     def save(self, path=CONFIG_PATH):
-        text = _TEMPLATE.format(**self._values())
+        lang = i18n.resolve(self.language)
+        text = _TEMPLATES[lang].format(**self._values())
         if self.plugin_hotkeys:
-            text += _PLUGINS_HEADER + "".join("%s = %s\n" % item for item in sorted(self.plugin_hotkeys.items()))
+            text += _PLUGINS_HEADERS[lang] + "".join("%s = %s\n" % item for item in sorted(self.plugin_hotkeys.items()))
         _write_atomic(path, text)
 
 
@@ -162,7 +227,7 @@ def _write_atomic(path, text, newline=None):
 def _key_blocks(values):
     """Рядки шаблону для кожного ключа секції [general]: його коментарі + «ключ = значення»."""
     blocks, comments, in_general = {}, [], False
-    for line in _TEMPLATE.format(**values).splitlines():
+    for line in _TEMPLATES[i18n.resolve(values["language"])].format(**values).splitlines():
         if line.strip() == "[general]":
             in_general = True
         elif in_general and line.startswith(";"):

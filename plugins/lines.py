@@ -27,7 +27,10 @@ def _number(lines):
 
 
 def register(api):
-    api.text_action("sort", "Рядки: впорядкувати за абеткою", _lines(_sort))
-    api.text_action("unique", "Рядки: прибрати повтори", _lines(_unique))
-    api.text_action("reverse", "Рядки: у зворотному порядку", _lines(lambda lines: lines[::-1]))
-    api.text_action("number", "Рядки: пронумерувати", _lines(_number))
+    api.text_action("sort", {"uk": "Рядки: впорядкувати за абеткою", "en": "Lines: sort alphabetically"},
+                    _lines(_sort))
+    api.text_action("unique", {"uk": "Рядки: прибрати повтори", "en": "Lines: remove duplicates"},
+                    _lines(_unique))
+    api.text_action("reverse", {"uk": "Рядки: у зворотному порядку", "en": "Lines: reverse order"},
+                    _lines(lambda lines: lines[::-1]))
+    api.text_action("number", {"uk": "Рядки: пронумерувати", "en": "Lines: number"}, _lines(_number))
