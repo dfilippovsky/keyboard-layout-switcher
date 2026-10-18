@@ -1,5 +1,6 @@
 """Іконки з Lucide (ISC): «languages» (https://lucide.dev/icons/languages) — програма
-й трей, «hat-glasses» (https://lucide.dev/icons/hat-glasses) — нагадування для очей.
+й трей, «hat-glasses» (https://lucide.dev/icons/hat-glasses) — нагадування для очей,
+«weight-tilde» (https://lucide.dev/icons/weight-tilde) — нагадування про перерву.
 
 Растеризуємо самі (з антиаліасингом, круглими кінцями й з'єднаннями) — без Pillow
 та файлів ресурсів: шляхи SVG перетворюються на відрізки (дуги й кола — на ламані).
@@ -32,12 +33,21 @@ HAT_GLASSES_PATHS = (
 )
 HAT_GLASSES_CIRCLES = ((17, 18, 3), (7, 18, 3))
 
+# lucide-static 1.59.0, icons/weight-tilde.svg
+WEIGHT_TILDE_PATHS = (
+    "M6.5 8a2 2 0 0 0-1.906 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5"
+    "A2 2 0 0 0 17.48 8z",
+    "M7.999 15a2.5 2.5 0 0 1 4 0 2.5 2.5 0 0 0 4 0",
+)
+WEIGHT_TILDE_CIRCLES = ((12, 5, 3),)
+
 APP_ICON_COLOR = (0x25, 0x63, 0xEB)
 # Коротке підсвічування в треї при спрацюванні гарячої клавіші
 FLASH_COLOR = (0x3B, 0x82, 0xF6)           # розкладка — синій
 CASE_FLASH_COLOR = (0x22, 0xC5, 0x5E)      # регістр — зелений
 TRANSLIT_FLASH_COLOR = (0xA8, 0x55, 0xF7)  # транслітерація — фіолетовий
 EYE_BREAK_COLOR = APP_ICON_COLOR           # коло під «hat-glasses» у сповіщенні
+WORK_BREAK_COLOR = (0xEA, 0x58, 0x0C)      # коло під «weight-tilde» — помаранчевий
 
 # ---------- SVG -> відрізки ----------
 
@@ -155,13 +165,13 @@ def _glyph(size, rgb):
     return [[(r, g, b, int(round(c * 255))) for c in row] for row in _stroke(size, SEGMENTS, size / 24.0)]
 
 
-def _eye_break(size):
-    """Біла «hat-glasses» у колі кольору EYE_BREAK_COLOR."""
+def _badge(size, paths, circles, rgb):
+    """Білий гліф Lucide у колі кольору rgb."""
     inner = size * 0.6  # гліф займає 60% діаметра кола
-    segments = [s for p in HAT_GLASSES_PATHS for s in path_segments(p)]
-    segments += [s for c in HAT_GLASSES_CIRCLES for s in circle_segments(*c)]
+    segments = [s for p in paths for s in path_segments(p)]
+    segments += [s for c in circles for s in circle_segments(*c)]
     glyph = _stroke(size, segments, inner / 24.0, (size - inner) / 2)
-    br, bg, bb = EYE_BREAK_COLOR
+    br, bg, bb = rgb
     c = size / 2.0
     rows = []
     for y in range(size):
@@ -173,6 +183,14 @@ def _eye_break(size):
                         int(round(bb + (255 - bb) * k)), int(round(disk * 255))))
         rows.append(row)
     return rows
+
+
+def _eye_break(size):
+    return _badge(size, HAT_GLASSES_PATHS, HAT_GLASSES_CIRCLES, EYE_BREAK_COLOR)
+
+
+def _work_break(size):
+    return _badge(size, WEIGHT_TILDE_PATHS, WEIGHT_TILDE_CIRCLES, WORK_BREAK_COLOR)
 
 
 def _dib(rows):
@@ -209,6 +227,10 @@ def eye_break_png(size):
     return _png(_eye_break(size))
 
 
+def work_break_png(size):
+    return _png(_work_break(size))
+
+
 def ico_bytes(sizes=(16, 20, 24, 32, 40, 48, 64, 128, 256), rgb=APP_ICON_COLOR):
     images = [dib(s, rgb) for s in sizes]
     out = struct.pack("<HHH", 0, 1, len(images))
@@ -235,6 +257,10 @@ def create_hicon(size, rgb):
 
 def create_eye_break_hicon(size):
     return _hicon(_dib(_eye_break(size)), size)
+
+
+def create_work_break_hicon(size):
+    return _hicon(_dib(_work_break(size)), size)
 
 
 def taskbar_is_light():

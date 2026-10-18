@@ -186,6 +186,7 @@ SendInput = _f(user32, "SendInput", W.UINT, W.UINT, ctypes.POINTER(INPUT), ctype
 GetAsyncKeyState = _f(user32, "GetAsyncKeyState", W.SHORT, ctypes.c_int)
 GetKeyState = _f(user32, "GetKeyState", W.SHORT, ctypes.c_int)
 GetLastInputInfo = _f(user32, "GetLastInputInfo", W.BOOL, ctypes.POINTER(LASTINPUTINFO))
+GetMessageTime = _f(user32, "GetMessageTime", W.LONG)
 RegisterRawInputDevices = _f(user32, "RegisterRawInputDevices", W.BOOL, ctypes.POINTER(RAWINPUTDEVICE),
                              W.UINT, W.UINT)
 GetRawInputData = _f(user32, "GetRawInputData", W.UINT, W.HANDLE, W.UINT, W.LPVOID,

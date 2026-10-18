@@ -43,7 +43,8 @@ _FOCUS_TIMEOUT = 1.0   # с — чекати, поки вікно знову с�
 _HOLD_TIMEOUT = 10.0   # с без натискань — завершити утримання
 _FLASH_MS = 350          # скільки іконка в треї світиться кольором дії після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
-ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS = range(100, 108)
+(ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS,
+ ID_WORK) = range(100, 109)
 ID_ACTION_BASE = 1000    # пункт меню «Дії» = ID_ACTION_BASE + номер дії
 # Вікна, які не є «робочими»: панель задач, область сповіщень, робочий стіл
 _SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
@@ -81,11 +82,15 @@ class App:
         self.flashing = None     # колір, яким зараз світиться іконка
         self.actions = {}        # номер -> actions.Action
         self.case_cycler = textcase.CaseCycler()
+        self.away = eyecare.BreakDetector()
         self.eyes = eyecare.EyeBreaks()
         self.eye_icon = None
+        self.work = eyecare.WorkBreaks()
+        self.work_icon = None
         self.tracker = autocorrect.Tracker()
         self.ac_exceptions = autocorrect.load_exceptions(EXCEPTIONS_PATH)
         self.raw = {_RAW_KEYBOARD: False, _RAW_MOUSE: False}  # що зараз зареєстровано в Raw Input
+        self.ac_tracking = False  # автовиправлення стежить за клавіатурою (Raw Input — ще й для перерв)
         self._raw_buf = (ctypes.c_byte * 64)()  # з запасом: RAWINPUT більший за заголовок + дані
         self._draining = False
 
@@ -190,6 +195,8 @@ class App:
                       "Автовиправлення розкладки під час набору")
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.eye_breaks else 0), ID_EYES,
                       "Нагадування 20-20-20 для очей")
+        w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.work_breaks else 0), ID_WORK,
+                      "Нагадування про перерву в роботі")
         w.AppendMenuW(m, w.MF_STRING, ID_SETTINGS, "Налаштування…")
         w.AppendMenuW(m, w.MF_STRING, ID_OPEN_INI, "Відкрити config.ini")
         w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, "Перечитати config.ini і плагіни")
@@ -218,6 +225,10 @@ class App:
             self.cfg.eye_breaks = not self.cfg.eye_breaks
             self.cfg.save()
             self.eyes.reset()
+        elif cmd == ID_WORK:
+            self.cfg.work_breaks = not self.cfg.work_breaks
+            self.cfg.save()
+            self.work.reset()
         elif cmd == ID_SETTINGS:
             self.open_settings()
         elif cmd == ID_OPEN_INI:
@@ -493,7 +504,7 @@ class App:
         keys = None
         if groups:
             try:
-                keys = kio.PhysicalKeys(self.hwnd, keep=self.raw[_RAW_KEYBOARD])
+                keys = kio.PhysicalKeys(self.hwnd, keep=self.ac_tracking)
             except OSError:
                 log.exception("raw input is unavailable")
         try:
@@ -793,26 +804,34 @@ class App:
             log.warning("RegisterRawInputDevices(%#x, %s) failed: %d", usage, on, ctypes.get_last_error())
 
     def _update_raw_input(self):
-        """Стежити за клавіатурою, лише поки автовиправлення увімкнене."""
+        """Стежити за клавіатурою, поки автовиправлення увімкнене (і поки чекаємо на
+        повернення користувача після бездіяльності — див. _watch_away)."""
         on = self.cfg.enabled and self.cfg.autocorrect
-        if on != self.raw[_RAW_KEYBOARD]:
+        if on != self.ac_tracking:
+            self.ac_tracking = on
             self.tracker.reset()
             self.tracker.caps = None  # поки не стежили, Caps Lock могли перемкнути
         if on:  # мовні дані — заздалегідь, щоб перше виправлення не барилося
             for hkl in layouts.installed():
                 autocorrect.model(autocorrect.lang_of(hkl))
-        self._set_raw(_RAW_KEYBOARD, on)
+        self._set_raw(_RAW_KEYBOARD, on or self.away.watching is not None)
         self._update_raw_mouse()
 
     def _update_raw_mouse(self):
         """Клік мишею може перенести курсор, тож поки є набране слово (або виправлення,
         яке можна скасувати), стежимо й за кнопками миші. Решту часу — ні: рух миші
-        дає сотні подій за секунду."""
-        self._set_raw(_RAW_MOUSE, self.raw[_RAW_KEYBOARD] and self.tracker.active)
+        дає сотні подій за секунду (крім очікування повернення користувача — тоді
+        подій немає, а перша ж знімає підписку)."""
+        self._set_raw(_RAW_MOUSE, (self.ac_tracking and self.tracker.active)
+                      or self.away.watching is not None)
 
     def _on_raw_input(self, lparam):
         """Обробити WM_INPUT. Повертає True, якщо це дія користувача, після якої
         передруковувати вже не можна (натиснуто клавішу або кнопку миші)."""
+        if self.away.watching is not None:
+            self._on_return(w.GetMessageTime())
+        if not self.ac_tracking:
+            return False  # підписка лише заради перерв (або запізніла подія після неї)
         buf = self._raw_buf
         size = ctypes.c_uint(ctypes.sizeof(buf))
         got = w.GetRawInputData(lparam, w.RID_INPUT, buf, ctypes.byref(size),
@@ -926,14 +945,61 @@ class App:
             except OSError:
                 log.exception("cannot save autocorrect exception")
 
-    # ---------- нагадування 20-20-20 ----------
+    # ---------- нагадування 20-20-20 і про перерву ----------
 
     def _eye_tick(self):
+        self._check_away()
+        worked = None
+        if self.cfg.work_breaks:
+            worked = self.work.tick(self.cfg.work_break_minutes)
+        else:
+            self.work.reset()
         if not self.cfg.eye_breaks:
             self.eyes.reset()
-            return
-        if self.eyes.tick(self.cfg.eye_break_minutes):
+        elif self.eyes.tick(self.cfg.eye_break_minutes) and worked is None:
             self.show_eye_break()
+        if worked is not None:
+            self.eyes.reset()  # перерва в роботі — заразом і для очей
+            self.show_work_break(worked)
+
+    def _check_away(self):
+        """Перерва (5 хв без введення або сон) — відлік обох нагадувань заново. Щоб не
+        пропустити паузу, яка закінчиться між перевірками, після 3 хв бездіяльності
+        чекаємо на перше введення (_watch_away)."""
+        if self.away.observe():
+            self._took_break()
+        if self.away.watching is not None:
+            stale = self.away.stale()
+            if stale is not None:  # введення пройшло повз підписку (сенсорний екран, перо)
+                self._on_return(stale)
+        elif (self.cfg.eye_breaks or self.cfg.work_breaks) and self.away.should_watch():
+            self._watch_away()
+
+    def _took_break(self):
+        self.eyes.reset()
+        self.work.reset()
+
+    def _watch_away(self):
+        """Підписатися на Raw Input клавіатури й миші, поки користувача немає: перше
+        введення прийде повідомленням з часом, коли воно сталося."""
+        if not self.away.watch():
+            return
+        self._update_raw_input()
+        if not (self.raw[_RAW_KEYBOARD] and self.raw[_RAW_MOUSE]):
+            self.away.stop()  # не вдалося — лишається щохвилинна перевірка
+            self._update_raw_input()
+            return
+        stale = self.away.stale()
+        if stale is not None:  # повернувся, поки ми підписувалися
+            self._on_return(stale)
+
+    def _on_return(self, input_tick):
+        """Перше введення після бездіяльності: пауза ≥ 5 хв — перерва. Підписку
+        повертаємо до тієї, що потрібна автовиправленню."""
+        if self.away.returned(input_tick):
+            log.debug("break detected on return")
+            self._took_break()
+        self._update_raw_input()
 
     def show_eye_break(self):
         if not self.eye_icon:  # велика іконка сповіщення — малюється при першому показі
@@ -943,6 +1009,15 @@ class App:
         # Тайм-аут у NOTIFYICONDATA Windows ігнорує, тож закриваємо самі
         if self.cfg.eye_break_popup_seconds:
             w.SetTimer(self.hwnd, EYE_HIDE_TIMER_ID, self.cfg.eye_break_popup_seconds * 1000, None)
+
+    def show_work_break(self, worked):
+        if not self.work_icon:
+            self.work_icon = icon.create_work_break_hicon(w.GetSystemMetrics(w.SM_CXICON) or 32)
+        # Не закриваємо самі (як нагадування для очей) — його легко пропустити
+        w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)
+        self.notify("Ти вже %s без перерви. Встань, пройдися, розімнися кілька хвилин."
+                    % eyecare.format_duration(worked),
+                    title="Час на перерву", quiet=True, balloon_icon=self.work_icon)
 
     def _hide_eye_break(self):
         w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)
@@ -955,6 +1030,8 @@ class App:
             if msg == w.WM_INPUT:
                 self._on_raw_input(lparam)  # далі DefWindowProc — так вимагає Raw Input
             elif msg == w.WM_HOTKEY and wparam % _HOTKEY_ALIAS in self.actions:
+                if self.away.watching is not None:  # раніше, ніж PhysicalKeys забере WM_INPUT
+                    self._on_return(w.GetMessageTime())
                 self.on_hotkey(wparam % _HOTKEY_ALIAS)
                 return 0
             if msg == w.WM_TIMER and wparam == FLASH_TIMER_ID:

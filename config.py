@@ -50,6 +50,11 @@ eye_breaks = {eye_breaks}
 eye_break_minutes = {eye_break_minutes}
 ; Через скільки секунд сповіщення закривається само (0 — як вирішить Windows)
 eye_break_popup_seconds = {eye_break_popup_seconds}
+; Нагадування про перерву після тривалої роботи без перерви (true/false).
+; Перервою вважається 5 хв без клавіатури й миші або сон комп'ютера.
+work_breaks = {work_breaks}
+; Скільки хвилин безперервної роботи до нагадування (15–480); далі — кожні 30 хв
+work_break_minutes = {work_break_minutes}
 """
 
 _PLUGINS_HEADER = """
@@ -87,6 +92,8 @@ class Config:
     eye_breaks: bool = True
     eye_break_minutes: int = 20
     eye_break_popup_seconds: int = 5
+    work_breaks: bool = True
+    work_break_minutes: int = 120
     # Секція [plugins]: id дії плагіна -> комбінація (перевизначає ту, що задав плагін)
     plugin_hotkeys: dict = field(default_factory=dict)
 
@@ -104,13 +111,13 @@ class Config:
         cfg.hotkey = sec.get("hotkey", cfg.hotkey).strip() or cfg.hotkey
         for key in ("case_hotkey", "translit_hotkey", "autocorrect_exclude"):  # порожнє = вимкнено / нічого
             setattr(cfg, key, sec.get(key, getattr(cfg, key)).strip())
-        for key in ("enabled", "switch_layout", "autocorrect", "reselect", "eye_breaks"):
+        for key in ("enabled", "switch_layout", "autocorrect", "reselect", "eye_breaks", "work_breaks"):
             try:
                 setattr(cfg, key, cp.getboolean("general", key, fallback=getattr(cfg, key)))
             except ValueError:
                 pass
         for key, lo, hi in (("copy_timeout_ms", 50, 5000), ("eye_break_minutes", 1, 240),
-                            ("eye_break_popup_seconds", 0, 120)):
+                            ("eye_break_popup_seconds", 0, 120), ("work_break_minutes", 15, 480)):
             try:
                 setattr(cfg, key, max(lo, min(hi, cp.getint("general", key, fallback=getattr(cfg, key)))))
             except ValueError:

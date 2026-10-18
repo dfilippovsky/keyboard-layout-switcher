@@ -75,6 +75,8 @@ def run(app):
     eyes_var = tk.BooleanVar(value=cfg.eye_breaks)
     eye_minutes_var = tk.StringVar(value=str(cfg.eye_break_minutes))
     eye_popup_var = tk.StringVar(value=str(cfg.eye_break_popup_seconds))
+    work_var = tk.BooleanVar(value=cfg.work_breaks)
+    work_minutes_var = tk.StringVar(value=str(cfg.work_break_minutes))
 
     frm = ttk.Frame(root, padding=16)
     frm.grid(sticky="nsew")
@@ -142,6 +144,17 @@ def run(app):
               foreground="gray").grid(row=row + 2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
     row += 3
+    work = ttk.Frame(frm)
+    work.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    ttk.Checkbutton(work, text="Нагадувати про перерву після",
+                    variable=work_var).pack(side="left")
+    ttk.Spinbox(work, from_=15, to=480, increment=15, width=5,
+                textvariable=work_minutes_var).pack(side="left", padx=4)
+    ttk.Label(work, text="хв роботи без перерви").pack(side="left")
+    ttk.Label(frm, text="Перерва — 5 хв без клавіатури й миші або сон; далі нагадує кожні 30 хв",
+              foreground="gray").grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+    row += 2
     names = ", ".join(layouts.name(h) for h in layouts.installed())
     ttk.Label(frm, text="Розкладки в системі (по колу): " + names,
               foreground="gray").grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
@@ -151,8 +164,9 @@ def run(app):
             timeout = max(50, min(5000, int(timeout_var.get())))
             eye_minutes = max(1, min(240, int(eye_minutes_var.get())))
             eye_popup = max(0, min(120, int(eye_popup_var.get())))
+            work_minutes = max(15, min(480, int(work_minutes_var.get())))
         except ValueError:
-            messagebox.showerror("Помилка", "Затримка, інтервал і час показу мають бути числами.", parent=root)
+            messagebox.showerror("Помилка", "Затримка, інтервали й час показу мають бути числами.", parent=root)
             return
         values = {field: get() for field, get in hotkeys.items()}
         # У config лишаються тільки відмінності від того, що задав плагін (і записи
@@ -169,7 +183,8 @@ def run(app):
                       autocorrect=autocorrect_var.get(),
                       autocorrect_exclude=", ".join(n.strip() for n in exclude_var.get().split(",") if n.strip()),
                       eye_breaks=eyes_var.get(), eye_break_minutes=eye_minutes,
-                      eye_break_popup_seconds=eye_popup)
+                      eye_break_popup_seconds=eye_popup, work_breaks=work_var.get(),
+                      work_break_minutes=work_minutes)
         error = app.apply_settings(values, autostart_var.get())
         if error:
             messagebox.showerror("Помилка", error, parent=root)
