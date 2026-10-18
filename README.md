@@ -37,6 +37,20 @@ way too (`руддщ` → `hello`).
 - **Undo:** press the layout hotkey (`Pause`) right after a correction. The text and layout
   go back, and the word is added to `autocorrect_exceptions.txt` next to the app, so it is
   never touched again. You can edit that file by hand: one word per line.
+- **Words that keep their layout** (call signs, codes, numbers: `N01`, `NK701`,
+  `EVAK1101`). The list is in `autocorrect_words.txt` next to the app, one word per line,
+  case does not matter (tray menu → **Words that keep their layout…**; changes apply right
+  away, no restart). Such a word typed in the wrong layout is fixed **before the space**:
+  as soon as a digit appears and it is clear that this is a listed word, not an ordinary
+  one. Type `Т0` and it becomes `N0`, the layout switches to English, and you keep typing
+  in it. `ТЛ7` → `NK7`, `УМФЛ1` → `EVAK1`. It is enough that some listed word starts with
+  what you typed: `N28` is fixed because `N20`…`N29` start that way. Digits can come from
+  the NumPad too. A word without digits is fixed once it is typed in full, but only if no
+  ordinary word of the current language starts that way; otherwise it is fixed at the
+  space. Punctuation around the word stays as typed
+  (`Т01,` → `N01,`). Fixing before the space needs layout switching (`switch_layout`);
+  with it off, a listed word is fixed at the space. Undo works the same way, with the
+  hotkey right after the fix, but the word is not added to `autocorrect_exceptions.txt`.
 - **When it stays out of the way:** after arrows, `Home`/`End`, `Enter`, `Tab`, a mouse
   click, a shortcut (`Ctrl+…`), switching windows or layouts, or text inserted by other
   programs, it does nothing until the next word. It also skips fullscreen apps and games,
@@ -255,7 +269,7 @@ Same app, the only difference is packaging and startup:
 | Antivirus        | more often suspicious of self-extracting exes          | less often                                  |
 | Distribution     | one file — easy to copy/share                          | the whole folder has to be moved            |
 
-In both cases `config.ini`, `autocorrect_exceptions.txt`, `plugins\` and the log live next
+In both cases `config.ini`, `autocorrect_exceptions.txt`, `autocorrect_words.txt`, `plugins\` and the log live next
 to the exe, and autostart points to the exe. `build.ps1` keeps your files there, for
 `-OneDir` too, where PyInstaller recreates the whole folder. It also adds the keys of the new
 version to `config.ini`; if there is no file yet, it creates one with the defaults. While
@@ -358,6 +372,20 @@ plays and the reason is logged) if:
 - **Скасувати:** одразу після виправлення натисніть гарячу клавішу розкладки (`Pause`).
   Текст і розкладка повернуться, а слово запишеться в `autocorrect_exceptions.txt` поруч
   із програмою, і більше його не чіпатимуть. Файл можна редагувати вручну: одне слово в рядку.
+- **Слова, що завжди у своїй розкладці** (позивні, коди, номери: `N01`, `NK701`,
+  `EVAK1101`). Список лежить в `autocorrect_words.txt` поруч із програмою, по одному слову
+  в рядку, великі й малі літери не розрізняються (меню трею →
+  **Слова, що завжди у своїй розкладці…**; зміни діють одразу, без перезапуску). Таке
+  слово, набране не в тій розкладці, виправляється ще **до пробілу**: щойно з'являється
+  цифра, і стає ясно, що це слово зі списку, а не звичайне. Набрали `Т0`: воно стає `N0`,
+  розкладка перемикається на англійську, і далі ви друкуєте вже в ній. `ТЛ7` → `NK7`,
+  `УМФЛ1` → `EVAK1`. Досить, щоб із набраного починалося якесь слово зі списку: `N28`
+  виправиться, бо так починаються `N20`…`N29`. Цифри можна набирати й на NumPad. Слово
+  без цифр виправляється, коли воно набране повністю, але лише якщо в поточній мові так
+  не починається жодне звичайне слово; інакше — на пробілі. Розділові знаки навколо слова лишаються як є (`Т01,` → `N01,`).
+  Без пробілу це працює лише з перемиканням розкладки (`switch_layout`); якщо воно
+  вимкнене, слово зі списку виправляється на пробілі. Скасовується так само, гарячою
+  клавішею одразу після виправлення, але до `autocorrect_exceptions.txt` слово не потрапляє.
 - **Коли не втручається:** після стрілок, `Home`/`End`, `Enter`, `Tab`, кліку мишею,
   комбінацій (`Ctrl+…`), перемикання вікна чи розкладки, а також тексту, вставленого
   іншими програмами, — до наступного слова нічого не робить. Не працює в повноекранних
@@ -577,7 +605,7 @@ CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, д
 | Антивіруси          | частіше насторожено ставляться до самопакованих exe | рідше                                  |
 | Поширення           | один файл — зручно скопіювати/передати           | треба переносити всю папку                |
 
-В обох варіантах `config.ini`, `autocorrect_exceptions.txt`, `plugins\` і лог лежать поруч
+В обох варіантах `config.ini`, `autocorrect_exceptions.txt`, `autocorrect_words.txt`, `plugins\` і лог лежать поруч
 з exe, автозапуск вказує на exe. `build.ps1` зберігає ваші файли там, і для `-OneDir` теж,
 де PyInstaller перестворює всю папку. У `config.ini` він дописує ключі нової версії; якщо
 файлу ще немає — створює його з налаштуваннями за замовчуванням. На час збірки копія цих

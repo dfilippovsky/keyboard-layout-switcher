@@ -5,13 +5,18 @@
 інших: якщо набране — не слово, а в іншій розкладці виходить слово (зі словника або
 за статистикою трибуквених сполучень), слово передруковується, а розкладка
 перемикається. Набраний текст нікуди не записується і не зберігається.
+
+Слова зі списку «завжди у своїй розкладці» (позивні, коди: «N01», «EVAK1101»)
+виправляються ще до пробілу — щойно зрозуміло, що набирається саме таке слово.
 """
+import bisect
 import dataclasses
 import gzip
 import logging
 import math
 import os
 import sys
+import time
 
 import layouts
 from i18n import tr
@@ -59,6 +64,7 @@ class LanguageModel:
                 self.contexts[tri[:2]] = self.contexts.get(tri[:2], 0) + int(count)
         self.alphabet = frozenset(alphabet)
         self._vocab = len(self.alphabet) + 1  # + кінець слова
+        self._sorted = None
 
     @classmethod
     def load(cls, lang, directory=None):
@@ -83,6 +89,12 @@ class LanguageModel:
             return None
         return rank
 
+    def has_prefix(self, prefix):
+        """Чи починається з prefix якесь слово словника."""
+        if self._sorted is None:
+            self._sorted = sorted(self.rank)
+        return _has_prefix(self._sorted, prefix)
+
     def score(self, word):
         """Середня лог-імовірність триграм слова (вище — «більш схоже» на цю мову)."""
         core = self.letters(word)
@@ -95,6 +107,11 @@ class LanguageModel:
             p = (self.trigrams.get(tri, 0) + _SMOOTHING) / (self.contexts.get(tri[:2], 0) + _SMOOTHING * self._vocab)
             total += math.log(p)
         return total / (len(padded) - 2)
+
+
+def _has_prefix(sorted_words, prefix):
+    i = bisect.bisect_left(sorted_words, prefix)
+    return i < len(sorted_words) and sorted_words[i].startswith(prefix)
 
 
 _models = {}
@@ -111,12 +128,12 @@ def model(lang):
     return _models[lang]
 
 
-def word_bounds(typed, conv):
-    """(початок, кінець) слова: розділові знаки по краях, які не є літерами в жодній
-    з розкладок, до слова не належать («lj,ht?» → «добре,»: «?»/«,» — суфікс,
+def word_bounds(typed, conv, part=str.isalpha):
+    """(початок, кінець) слова: розділові знаки по краях, які не є літерами (part) в
+    жодній з розкладок, до слова не належать («lj,ht?» → «добре,»: «?»/«,» — суфікс,
     а «,» всередині — це «б»)."""
     def letter(i):
-        return typed[i].isalpha() or conv[i].isalpha()
+        return part(typed[i]) or part(conv[i])
     start, end = 0, min(len(typed), len(conv))
     while start < end and not letter(start):
         start += 1
@@ -163,8 +180,8 @@ def is_better(typed, typed_model, conv, conv_model, exceptions=(), short=False):
     return False, 0
 
 
-def load_exceptions(path):
-    """Слова, які не можна виправляти (по одному в рядку, # — коментар)."""
+def load_words(path):
+    """Слова з файлу (по одному в рядку, # — коментар), малими літерами."""
     try:
         with open(path, encoding="utf-8-sig") as f:
             return {line.strip().lower() for line in f if line.strip() and not line.startswith("#")}
@@ -180,6 +197,48 @@ def add_exception(path, word):
         f.write(word + "\n")
 
 
+class ForcedWords:
+    """Слова, які завжди набираються у «своїй» розкладці (позивні, коди, номери),
+    з файлу по одному в рядку. Файл перечитується, щойно змінився."""
+
+    _CHECK_EVERY = 1.0   # с — не частіше перевіряти, чи змінився файл
+
+    def __init__(self, path):
+        self.path = path
+        self.words = frozenset()
+        self._sorted = []
+        self._mtime = None
+        self._checked = None
+
+    def refresh(self, force=False):
+        now = time.monotonic()
+        if not force and self._checked is not None and now - self._checked < self._CHECK_EVERY:
+            return
+        self._checked = now
+        try:
+            mtime = os.stat(self.path).st_mtime_ns
+        except OSError:
+            mtime = None
+        if mtime != self._mtime:
+            self._mtime = mtime
+            self.words = frozenset(load_words(self.path)) if mtime is not None else frozenset()
+            self._sorted = sorted(self.words)
+
+    def ensure_file(self):
+        if not os.path.exists(self.path):
+            with open(self.path, "w", encoding="utf-8") as f:
+                f.write(tr("forced.header"))
+
+    def __bool__(self):
+        return bool(self.words)
+
+    def __contains__(self, word):
+        return word in self.words
+
+    def has_prefix(self, prefix):
+        return _has_prefix(self._sorted, prefix)
+
+
 def lang_of(hkl):
     return layouts.name(hkl).lower()
 
@@ -190,6 +249,9 @@ def render(keys, hkl):
     chars = layouts.keymap(hkl).key_to_char
     out = []
     for vk, shift, altgr, caps in keys:
+        if VK_NUMPAD0 <= vk <= VK_NUMPAD9:
+            out.append(str(vk - VK_NUMPAD0))
+            continue
         ch = chars.get((vk, layouts.state_index(shift, altgr)))
         if ch is None:
             return None
@@ -204,11 +266,52 @@ class Correction:
     typed: str            # набраний текст (одне або кілька слів через пробіл)
     fixed: str            # виправлений текст
     word: str             # головне (останнє) набране слово без розділових знаків — для винятків
+    tail: str = " "       # що надруковано після слова (до пробілу — нічого)
 
 
-def choose(words, cur, hkls, exceptions=()):
+def forced(keys, cur, hkls, words, partial=False):
+    """Клавіші слова в іншій розкладці дають слово зі списку words (ForcedWords) —
+    Correction на цю розкладку, інакше None. partial — слово ще набирається: досить,
+    щоб із набраного починалося слово зі списку, а в поточній мові — жодне слово
+    словника («т0» → «N0»: так починається «N01»). Щоб не зачепити рідкісних слів,
+    яких немає в словнику («тло» і «NK701»), до пробілу — лише коли набрано цифру
+    або слово зі списку повністю."""
+    if not words:
+        return None
+    typed = render(keys, cur)
+    if typed is None:
+        return None
+    for hkl in _cycle_after(cur, hkls):
+        conv = render(keys, hkl)
+        if conv is None:
+            continue
+        start, end = word_bounds(typed, conv, str.isalnum)  # цифри — частина слова («N01»)
+        low, target = typed[start:end].lower(), conv[start:end].lower()
+        if not target or low == target or low in words:
+            continue
+        if partial:
+            if not words.has_prefix(target) or words.has_prefix(low):
+                continue
+            if target not in words and not any(ch.isdigit() for ch in target):
+                continue
+            typed_model = model(lang_of(cur))
+            if typed_model is None or typed_model.has_prefix(low):
+                continue  # ще може вийти звичайне слово поточної мови — чекаємо далі
+        elif target not in words:
+            continue
+        # Розділові знаки навколо слова лишаються як набрані («Т01,» → «N01,»);
+        # word="" — скасування не додає слово до винятків: воно ж зі списку
+        fixed = typed[:start] + conv[start:end] + typed[end:]
+        return Correction(cur, hkl, typed, fixed, "", "" if partial else " ")
+    return None
+
+
+def choose(words, cur, hkls, exceptions=(), forced_words=None):
     """words — клавіші останнього слова й попередніх коротких (від давніших до
     останнього). Повертає Correction або None."""
+    fix = forced(words[-1], cur, hkls, forced_words)
+    if fix is not None:
+        return fix
     typed_model = model(lang_of(cur))
     typed = [render(k, cur) for k in words]
     if typed_model is None or None in typed:
@@ -245,6 +348,7 @@ def _cycle_after(cur, hkls):
 
 
 VK_BACK, VK_SPACE, VK_CAPITAL = 0x08, 0x20, 0x14
+VK_NUMPAD0, VK_NUMPAD9 = 0x60, 0x69
 _SHIFTS = {0xA0, 0xA1}
 _CTRLS = {0xA2, 0xA3}
 _LALT, _RALT = 0xA4, 0xA5
@@ -267,6 +371,7 @@ class Tracker:
         self._caps_held = False   # автоповтор утримуваного Caps Lock не перемикає його знову
         self.ignore_vks = set()   # клавіші гарячої клавіші розкладки — не скидають «скасування»
         self.correction = None    # остання виправлена фраза (поки її можна скасувати)
+        self.appended = False     # остання подія додала клавішу до поточного слова
         self.reset()
 
     def reset(self):
@@ -283,6 +388,7 @@ class Tracker:
         """Одна подія клавіатури (vk — з уточненням лівий/правий; own — її надіслала
         сама програма). Повертає список клавіш слів, якщо щойно натиснуто пробіл
         після слова, інакше None."""
+        self.appended = False
         if own:
             return None  # наші власні передруковування враховує той, хто їх надсилає
         if vk == VK_CAPITAL:
@@ -302,8 +408,11 @@ class Tracker:
             self.reset()  # текст змінила інша програма — що в полі, вже невідомо
             return None
         altgr = _RALT in self.mods
+        # Цифри з NumPad однакові в усіх розкладках (див. render). Shift+NumPad — це
+        # стрілки, Home/End…: курсор міг зсунутися, тож такі клавіші скидають слово
+        numpad = VK_NUMPAD0 <= vk <= VK_NUMPAD9 and not self.mods & _SHIFTS and not altgr
         shortcut = (self.mods & _CTRLS and not altgr) or _LALT in self.mods or self.mods & _WINS
-        if shortcut or vk not in layouts.TYPING_VKS | {VK_SPACE, VK_BACK}:
+        if shortcut or not numpad and vk not in layouts.TYPING_VKS | {VK_SPACE, VK_BACK}:
             if vk not in self.ignore_vks:
                 self.reset()
             return None
@@ -328,7 +437,12 @@ class Tracker:
             self.reset()
             return None
         self.keys.append((vk, bool(self.mods & _SHIFTS), altgr, bool(self.caps)))
+        self.appended = True
         return None
+
+    def switched(self, hkl):
+        """Слово передруковано посередині й розкладку перемкнено: набір триває в hkl."""
+        self.hkl = hkl
 
     def finished(self, words, corrected):
         """Після пробілу: corrected — чи ці слова виправляються (тоді ланцюжок коротких
