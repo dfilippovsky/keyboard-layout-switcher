@@ -7,7 +7,10 @@ from tkinter import messagebox, ttk
 import config
 import hotkey as hk
 import icon
+import i18n
 import layouts
+import winapi as w
+from i18n import tr
 
 log = logging.getLogger(__name__)
 
@@ -15,10 +18,11 @@ _MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA
 _CLEAR_VKS = {0x08, 0x2E}  # Backspace/Delete без модифікаторів — вимкнути комбінацію
 
 _HOTKEY_ROWS = (
-    ("hotkey", "Розкладка:", False),
-    ("case_hotkey", "Регістр (aA, camelCase…):", True),
-    ("translit_hotkey", "Транслітерація (Привіт → Pryvit):", True),
+    ("hotkey", "ui.hk_layout", False),
+    ("case_hotkey", "ui.hk_case", True),
+    ("translit_hotkey", "ui.hk_translit", True),
 )
+_LANGUAGE_NAMES = {"uk": "Українська", "en": "English"}  # кожна — своєю мовою
 
 
 def _hotkey_entry(frm, row, label, initial, allow_clear):
@@ -77,17 +81,22 @@ def run(app):
     eye_popup_var = tk.StringVar(value=str(cfg.eye_break_popup_seconds))
     work_var = tk.BooleanVar(value=cfg.work_breaks)
     work_minutes_var = tk.StringVar(value=str(cfg.work_break_minutes))
+    languages = [("auto", tr("ui.language_auto"))] + list(_LANGUAGE_NAMES.items())
+    language_var = tk.StringVar(value=dict(languages).get(cfg.language, languages[0][1]))
 
     frm = ttk.Frame(root, padding=16)
     frm.grid(sticky="nsew")
 
-    ttk.Label(frm, text="Гарячі клавіші", font=("Segoe UI", 9, "bold")).grid(
-        row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
-    hotkeys = {field: _hotkey_entry(frm, i, label, getattr(cfg, field), allow_clear)
-               for i, (field, label, allow_clear) in enumerate(_HOTKEY_ROWS, start=1)}
-    row = 1 + len(_HOTKEY_ROWS)
-    ttk.Label(frm, text="Клацніть у поле й натисніть комбінацію; Backspace — вимкнути\n"
-                        "(для регістру й транслітерації)",
+    ttk.Label(frm, text=tr("ui.language")).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
+    ttk.Combobox(frm, textvariable=language_var, values=[name for _, name in languages],
+                 state="readonly", width=24).grid(row=0, column=1, sticky="w", pady=(0, 10))
+
+    ttk.Label(frm, text=tr("ui.hotkeys"), font=("Segoe UI", 9, "bold")).grid(
+        row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
+    hotkeys = {field: _hotkey_entry(frm, i, tr(label), getattr(cfg, field), allow_clear)
+               for i, (field, label, allow_clear) in enumerate(_HOTKEY_ROWS, start=2)}
+    row = 2 + len(_HOTKEY_ROWS)
+    ttk.Label(frm, text=tr("ui.hk_hint"),
               foreground="gray").grid(row=row, column=1, sticky="w", pady=(2, 10))
 
     # Дії з плагінів (plugins\*.py): комбінація з [plugins] або та, що задав плагін
@@ -95,68 +104,67 @@ def run(app):
     plugin_hotkeys = []  # (дія, функція, що дає вибране значення)
     if plugin_actions:
         row += 1
-        ttk.Label(frm, text="Плагіни", font=("Segoe UI", 9, "bold")).grid(
+        ttk.Label(frm, text=tr("ui.plugins"), font=("Segoe UI", 9, "bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
         for action in plugin_actions:
             row += 1
-            plugin_hotkeys.append((action, _hotkey_entry(frm, row, action.title + ":", app.hotkey_text(action), True)))
+            plugin_hotkeys.append((action, _hotkey_entry(frm, row, action.label + ":", app.hotkey_text(action), True)))
         row += 1
-        ttk.Label(frm, text="Backspace — вимкнути", foreground="gray").grid(
+        ttk.Label(frm, text=tr("ui.plugins_hint"), foreground="gray").grid(
             row=row, column=1, sticky="w", pady=(2, 10))
 
     checks = (
-        (enabled_var, "Увімкнено (гарячі клавіші й автовиправлення)"),
-        (switch_var, "Перемикати розкладку після конвертації"),
-        (reselect_var, "Виділяти перетворений текст (повторне натискання — далі по колу)"),
-        (autocorrect_var, "Автовиправлення розкладки під час набору (ghbdsn → привіт)"),
-        (autostart_var, "Запускати разом з Windows"),
+        (enabled_var, tr("ui.enabled")),
+        (switch_var, tr("ui.switch")),
+        (reselect_var, tr("ui.reselect")),
+        (autocorrect_var, tr("ui.autocorrect")),
+        (autostart_var, tr("ui.autostart")),
     )
     for i, (var, text) in enumerate(checks, start=row + 1):
         ttk.Checkbutton(frm, text=text, variable=var).grid(row=i, column=0, columnspan=2, sticky="w", pady=2)
 
     row += 1 + len(checks)
-    ttk.Label(frm, text="Не виправляти в програмах:").grid(row=row, column=0, sticky="w", pady=(6, 0))
+    ttk.Label(frm, text=tr("ui.exclude")).grid(row=row, column=0, sticky="w", pady=(6, 0))
     ttk.Entry(frm, textvariable=exclude_var, width=26).grid(row=row, column=1, sticky="ew", pady=(6, 0))
-    ttk.Label(frm, text="Імена exe через кому, напр. WindowsTerminal.exe, code.exe.\n"
-                        "Скасувати виправлення — одразу натиснути гарячу клавішу розкладки.",
+    ttk.Label(frm, text=tr("ui.exclude_hint"),
               foreground="gray").grid(row=row + 1, column=1, sticky="w", pady=(2, 0))
 
     row += 2
-    ttk.Label(frm, text="Очікування Ctrl+C, мс:").grid(row=row, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(frm, text=tr("ui.timeout")).grid(row=row, column=0, sticky="w", pady=(10, 0))
     ttk.Spinbox(frm, from_=50, to=5000, increment=50, width=8,
                 textvariable=timeout_var).grid(row=row, column=1, sticky="w", pady=(10, 0))
 
     row += 1
     eyes = ttk.Frame(frm)
     eyes.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
-    ttk.Checkbutton(eyes, text="Нагадувати дати відпочити очам (20-20-20) кожні",
+    ttk.Checkbutton(eyes, text=tr("ui.eyes"),
                     variable=eyes_var).pack(side="left")
     ttk.Spinbox(eyes, from_=1, to=240, increment=5, width=5,
                 textvariable=eye_minutes_var).pack(side="left", padx=4)
-    ttk.Label(eyes, text="хв").pack(side="left")
+    ttk.Label(eyes, text=tr("ui.min")).pack(side="left")
     popup = ttk.Frame(frm)
     popup.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0), padx=(20, 0))
-    ttk.Label(popup, text="Сповіщення закривається через").pack(side="left")
+    ttk.Label(popup, text=tr("ui.popup")).pack(side="left")
     ttk.Spinbox(popup, from_=0, to=120, increment=1, width=5,
                 textvariable=eye_popup_var).pack(side="left", padx=4)
-    ttk.Label(popup, text="с (0 — як вирішить Windows)").pack(side="left")
-    ttk.Label(frm, text="Не з'являється в повноекранному режимі, «Не турбувати» і під час дзвінків",
+    ttk.Label(popup, text=tr("ui.popup_unit")).pack(side="left")
+    ttk.Label(frm, text=tr("ui.eyes_hint"),
               foreground="gray").grid(row=row + 2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
     row += 3
     work = ttk.Frame(frm)
     work.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
-    ttk.Checkbutton(work, text="Нагадувати про перерву після",
+    ttk.Checkbutton(work, text=tr("ui.work"),
                     variable=work_var).pack(side="left")
     ttk.Spinbox(work, from_=15, to=480, increment=15, width=5,
                 textvariable=work_minutes_var).pack(side="left", padx=4)
-    ttk.Label(work, text="хв роботи без перерви").pack(side="left")
-    ttk.Label(frm, text="Перерва — 5 хв без клавіатури й миші або сон; далі нагадує кожні 30 хв",
+    ttk.Label(work, text=tr("ui.work_unit")).pack(side="left")
+    ttk.Label(frm, text=tr("ui.work_hint"),
               foreground="gray").grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
     row += 2
     names = ", ".join(layouts.name(h) for h in layouts.installed())
-    ttk.Label(frm, text="Розкладки в системі (по колу): " + names,
+    ttk.Label(frm, text=tr("ui.layouts") + names,
               foreground="gray").grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     def save():
@@ -166,7 +174,7 @@ def run(app):
             eye_popup = max(0, min(120, int(eye_popup_var.get())))
             work_minutes = max(15, min(480, int(work_minutes_var.get())))
         except ValueError:
-            messagebox.showerror("Помилка", "Затримка, інтервали й час показу мають бути числами.", parent=root)
+            messagebox.showerror(tr("ui.error"), tr("ui.not_numbers"), parent=root)
             return
         values = {field: get() for field, get in hotkeys.items()}
         # У config лишаються тільки відмінності від того, що задав плагін (і записи
@@ -178,6 +186,7 @@ def run(app):
             else:
                 overrides[action.key] = get()
         values["plugin_hotkeys"] = overrides
+        values["language"] = next(code for code, name in languages if name == language_var.get())
         values.update(enabled=enabled_var.get(), switch_layout=switch_var.get(),
                       reselect=reselect_var.get(), copy_timeout_ms=timeout,
                       autocorrect=autocorrect_var.get(),
@@ -187,19 +196,23 @@ def run(app):
                       work_break_minutes=work_minutes)
         error = app.apply_settings(values, autostart_var.get())
         if error:
-            messagebox.showerror("Помилка", error, parent=root)
+            messagebox.showerror(tr("ui.error"), error, parent=root)
         else:
             root.destroy()
 
     buttons = ttk.Frame(frm)
     buttons.grid(row=row + 1, column=0, columnspan=2, sticky="e", pady=(16, 0))
-    ttk.Button(buttons, text="Зберегти", command=save).pack(side="left", padx=(0, 6))
-    ttk.Button(buttons, text="Скасувати", command=root.destroy).pack(side="left")
+    ttk.Button(buttons, text=tr("ui.save"), command=save).pack(side="left", padx=(0, 6))
+    ttk.Button(buttons, text=tr("ui.cancel"), command=root.destroy).pack(side="left")
     root.bind("<Escape>", lambda e: root.destroy())
 
     root.update_idletasks()
     x = (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2
-    y = (root.winfo_screenheight() - root.winfo_reqheight()) // 3
+    # Третина висоти екрана, але так, щоб кнопки не опинилися під панеллю задач
+    # (40 — запас на заголовок вікна)
+    _, top, _, bottom = w.work_area()
+    y = max(top, min((root.winfo_screenheight() - root.winfo_reqheight()) // 3,
+                     bottom - root.winfo_reqheight() - 40))
     root.geometry("+%d+%d" % (x, y))
     root.attributes("-topmost", True)
     root.after(300, lambda: root.attributes("-topmost", False))

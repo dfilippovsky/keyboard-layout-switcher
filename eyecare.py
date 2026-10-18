@@ -184,23 +184,3 @@ class WorkBreaks(_Tracker):
             return None  # відкладаємо до наступної перевірки
         self.reminded = worked
         return worked
-
-
-def _plural(n, one, few, many):
-    if n % 10 == 1 and n % 100 != 11:
-        return one
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return few
-    return many
-
-
-def format_duration(seconds):
-    """Тривалість у знахідному відмінку: «2 години», «1 годину 30 хвилин», «45 хвилин»."""
-    minutes = int(seconds // 60)
-    hours, minutes = divmod(minutes, 60)
-    parts = []
-    if hours:
-        parts.append("%d %s" % (hours, _plural(hours, "годину", "години", "годин")))
-    if minutes or not hours:
-        parts.append("%d %s" % (minutes, _plural(minutes, "хвилину", "хвилини", "хвилин")))
-    return " ".join(parts)

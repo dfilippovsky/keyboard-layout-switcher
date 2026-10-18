@@ -92,6 +92,8 @@ def register(api):
     api.text_action("upper", "UPPER CASE", str.upper, hotkey="Ctrl+Alt+U")
     # Any code: ctx.window, ctx.notify(), ctx.edit_text(), ctx.type_text()
     api.action("hello", "Say hello", lambda ctx: ctx.notify("Hello!"))
+    # Titles and texts in several languages: shown in the interface language
+    api.text_action("lower", {"uk": "малі літери", "en": "lower case"}, str.lower)
 ```
 
 - The full action id is `<file>.<id>`, e.g. `my_tools.upper`. A hotkey can be overridden or
@@ -100,6 +102,10 @@ def register(api):
   automatically.
 - Files starting with `_` are not loaded. [`plugins\_template.py`](plugins/_template.py)
   describes the whole API: copy it under a new name.
+- A title (and the text of `ctx.notify()`) is a string or a `{"uk": ..., "en": ...}`
+  dictionary. The variant in the interface language is shown (English if it is missing),
+  and it changes together with the language. `api.language` / `ctx.language` give the
+  current one (`"uk"` or `"en"`).
 - Bundled plugins: `ua_typography` (`Shift+Pause`, see above) and `lines` (sort lines,
   remove duplicates, reverse, number them; menu only).
 - After adding or changing a plugin, use **Reload config.ini and plugins** in the tray menu.
@@ -157,7 +163,8 @@ which is not a keyboard hook.
 
 ## Settings
 
-The settings window has: three hotkeys and the hotkeys of plugin actions (click a field
+The settings window has: the **interface language** (Ukrainian, English, or the same as
+Windows), three hotkeys and the hotkeys of plugin actions (click a field
 and press the combination; `Backspace` clears it and turns the action off; the layout
 hotkey cannot be cleared),
 enable/disable, layout switching, reselecting converted text, auto-correct while typing
@@ -168,6 +175,7 @@ Everything is stored in `config.ini` next to `main.py` / the exe (created on fir
 
 | Key               | Default  | Description |
 |-------------------|----------|-------------|
+| `language`        | `auto`   | Interface language: `uk`, `en` or `auto` (Ukrainian if Windows is in Ukrainian, otherwise English). New comments in `config.ini` are written in this language. Existing comments are kept as they are when the file is updated, and change language only when the settings are saved (the file is then rewritten). |
 | `hotkey`          | `Pause`  | Layout conversion. Combination: `Ctrl`/`Alt`/`Shift`/`Win` + key. Examples: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
 | `case_hotkey`     | `Alt+Pause` | Case change. Empty — off. |
 | `translit_hotkey` | `Ctrl+Pause` | Transliteration. Empty — off. |
@@ -405,6 +413,8 @@ def register(api):
     api.text_action("upper", "ВЕЛИКІ ЛІТЕРИ", str.upper, hotkey="Ctrl+Alt+U")
     # Довільний код: ctx.window, ctx.notify(), ctx.edit_text(), ctx.type_text()
     api.action("hello", "Привітання", lambda ctx: ctx.notify("Привіт!"))
+    # Назви й тексти кількома мовами: показується мовою інтерфейсу
+    api.text_action("lower", {"uk": "малі літери", "en": "lower case"}, str.lower)
 ```
 
 - Повний ідентифікатор дії — `<файл>.<id>`, наприклад `my_tools.upper`. Гарячу клавішу можна
@@ -413,6 +423,9 @@ def register(api):
   плагіна буде підхоплено автоматично.
 - Файли, що починаються з `_`, не завантажуються. У [`plugins\_template.py`](plugins/_template.py)
   описано весь API: скопіюйте його під новим ім'ям.
+- Назва (і текст `ctx.notify()`) — рядок або словник `{"uk": ..., "en": ...}`. Показується
+  варіант мовою інтерфейсу (якщо його немає — англійський), і він змінюється разом із
+  мовою. Поточну мову дають `api.language` / `ctx.language` (`"uk"` або `"en"`).
 - Плагіни в комплекті: `ua_typography` (`Shift+Pause`, див. вище) і `lines` (упорядкувати
   рядки, прибрати повтори, розвернути, пронумерувати; лише з меню).
 - Після додавання чи зміни плагіна — меню трею **Перечитати config.ini і плагіни**. Якщо
@@ -473,7 +486,8 @@ def register(api):
 
 ## Налаштування
 
-Вікно налаштувань: три гарячі клавіші й гарячі клавіші дій з плагінів (клацніть у поле
+Вікно налаштувань: **мова інтерфейсу** (українська, англійська або як у Windows), три
+гарячі клавіші й гарячі клавіші дій з плагінів (клацніть у поле
 й натисніть комбінацію; `Backspace` очищує клавішу й вимикає дію; клавішу розкладки
 очистити не можна),
 увімкнення, перемикання розкладки, повторне виділення, автовиправлення під час набору
@@ -484,6 +498,7 @@ def register(api):
 
 | Ключ              | За замовчуванням | Опис |
 |-------------------|------------------|------|
+| `language`        | `auto`           | Мова інтерфейсу: `uk`, `en` або `auto` (українська, якщо Windows українською, інакше англійська). Нові коментарі в `config.ini` пишуться цією мовою. Наявні коментарі під час оновлення файлу лишаються як є і змінюють мову лише після збереження налаштувань (тоді файл перезаписується). |
 | `hotkey`          | `Pause`          | Конвертація розкладки. Комбінація: `Ctrl`/`Alt`/`Shift`/`Win` + клавіша. Приклади: `Shift+Pause`, `Ctrl+Alt+Space`, `Alt+F12`, `Win+VKE8`. |
 | `case_hotkey`     | `Alt+Pause`      | Зміна регістру. Порожньо — вимкнено. |
 | `translit_hotkey` | `Ctrl+Pause`     | Транслітерація. Порожньо — вимкнено. |
