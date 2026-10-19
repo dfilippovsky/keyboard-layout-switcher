@@ -30,7 +30,7 @@ $out = if ($OneDir) { "dist\KeyboardLayoutSwitcher" } else { "dist\KeyboardLayou
 # навіть при помилці.
 $appDir = if ($OneDir) { $out } else { "dist" }
 $cfg = Join-Path $appDir "config.ini"
-$userFiles = "config.ini", "autocorrect_exceptions.txt", "autocorrect_words.txt", "plugins"
+$userFiles = "config.ini", "autocorrect_exceptions.txt", "autocorrect_words.txt", "stats.json", "plugins"
 $backup = "build\userdata.{0}" -f $(if ($OneDir) { "onedir" } else { "onefile" })
 
 function Restore-UserFiles {

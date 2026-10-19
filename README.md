@@ -59,9 +59,31 @@ way too (`руддщ` → `hello`).
   are left alone.
 - **Privacy:** keystrokes are read through Raw Input, without keyboard hooks. Only the
   current word and a few short words before it are kept in memory, and the text is never
-  written anywhere, the debug log included.
+  written anywhere, the debug log included. With auto-correct off, keystrokes are read only
+  while a hotkey modifier is held and for 10 s after a layout conversion (for the
+  [statistics](#statistics), noting only that a key was pressed).
 
 Turn it on or off in the tray menu or the settings (`autocorrect`).
+
+### Statistics
+
+Tray menu → **Statistics** shows how many times the layout was fixed (automatically while
+typing and with the hotkey), how much time that saved, the same for today, and since when
+it has been counting. Only counters are kept, never text: `stats.json` next to the app,
+written once a minute and on exit. To start over, delete the file, even while the app is
+running: it notices and starts counting from zero instead of writing the old numbers back.
+
+- An auto-correct you undo with the hotkey is not counted.
+- Pressing the hotkey again on text it has just converted (the next layout in the cycle)
+  is still the same mistake and is counted once: within 10 s, the same text in the same
+  window, and nothing pressed or clicked in between except the hotkey. Moving to another
+  field takes a click or a key, so a fix there is counted as a new one. For those 10 s the
+  app watches the keyboard and mouse buttons through Raw Input (even with auto-correct off),
+  noting only that something was pressed.
+- Time saved is an estimate of what fixing it by hand would take: erasing and retyping
+  takes ≈ 0.3 s per character, plus 1 s to switch the layout, and for auto-correct another
+  1 s to notice the mistake. So `ghbdsn` → `привіт` saves ≈ 3.8 s automatically and ≈ 2.8 s
+  with the hotkey.
 
 ### More tools
 
@@ -169,7 +191,7 @@ Or build the exe (see below) and run `KeyboardLayoutSwitcher.exe`.
 - **Double-click** — settings window.
 - **Right-click** — menu: **Actions** (every action with its hotkey; it runs on the window
   that was active before you clicked the tray), Enabled, Auto-correct layout while typing,
-  20-20-20 eye breaks, Work break reminders, Settings…, Open config.ini, Reload config.ini and plugins,
+  20-20-20 eye breaks, Work break reminders, Statistics, Settings…, Open config.ini, Reload config.ini and plugins,
   Open plugins folder, Exit.
 
 The app finds the previously active window through a `WinEvent` foreground notification,
@@ -269,7 +291,7 @@ Same app, the only difference is packaging and startup:
 | Antivirus        | more often suspicious of self-extracting exes          | less often                                  |
 | Distribution     | one file — easy to copy/share                          | the whole folder has to be moved            |
 
-In both cases `config.ini`, `autocorrect_exceptions.txt`, `autocorrect_words.txt`, `plugins\` and the log live next
+In both cases `config.ini`, `autocorrect_exceptions.txt`, `autocorrect_words.txt`, `stats.json`, `plugins\` and the log live next
 to the exe, and autostart points to the exe. `build.ps1` keeps your files there, for
 `-OneDir` too, where PyInstaller recreates the whole folder. It also adds the keys of the new
 version to `config.ini`; if there is no file yet, it creates one with the defaults. While
@@ -282,9 +304,12 @@ better (less RAM, faster start). Use the single file when easy sharing matters m
 Resources: ~25 MB RAM in the background (onefile additionally keeps a ~10 MB bootloader
 process), plus ~10 MB for the language data when auto-correct is on. CPU use is next to
 zero: there are no keyboard hooks or polling, just `RegisterHotKey` and one timer check per
-minute for breaks. Raw Input is used in three cases. Keyboard events are read only while
+minute for breaks. Raw Input is used in four cases. Keyboard events are read only while
 auto-correct is on, or while a hotkey modifier is held. Mouse buttons are watched only while
-a word is being typed, since a click may move the caret. After 3 minutes without input, the
+a word is being typed, since a click may move the caret. For 10 s after a layout conversion
+by hotkey, the app notes whether any key or mouse button was pressed (keyboard and mouse
+buttons, even with auto-correct off), so that pressing the hotkey again is not counted in
+the statistics as a new fix. After 3 minutes without input, the
 app waits for the first key press or mouse movement to measure the exact length of the
 pause (only the time of that event is used), then stops listening. While you are away there
 are no events, so this costs nothing. Tk is loaded only when the settings
@@ -394,9 +419,32 @@ plays and the reason is logged) if:
   автовиправлення не чіпає.
 - **Приватність:** натискання читаються через Raw Input, без хуків клавіатури. У пам'яті
   тримаються лише поточне слово й кілька коротких перед ним. Текст ніде не записується,
-  навіть у детальний лог.
+  навіть у детальний лог. З вимкненим автовиправленням натискання читаються лише поки
+  утримується модифікатор гарячої клавіші і 10 с після конвертації розкладки (для
+  [статистики](#статистика) — лише те, чи щось натиснуто).
 
 Вмикається й вимикається в меню трею або в налаштуваннях (`autocorrect`).
+
+### Статистика
+
+Меню трею → **Статистика** показує, скільки разів виправлено розкладку (автоматично під
+час набору і гарячою клавішею), скільки часу це зекономило, те саме за сьогодні і з якого
+дня йде відлік. Зберігаються лише лічильники, без жодного тексту: `stats.json` поруч із
+програмою, записується раз на хвилину і при виході. Щоб почати з нуля — видаліть файл,
+можна й поки програма працює: вона це помітить і почне рахувати з нуля, а не запише старі
+значення назад.
+
+- Автовиправлення, скасоване гарячою клавішею, не рахується.
+- Повторне натискання гарячої клавіші на щойно перетвореному тексті (наступна розкладка
+  по колу) — та сама помилка, рахується один раз: якщо минуло не більше 10 с, це той самий
+  текст у тому самому вікні, а між натисканнями — жодної іншої клавіші чи кліку. Щоб
+  перейти до іншого поля, треба клацнути або натиснути клавішу, тож виправлення там
+  рахується як нове. Ці 10 с програма стежить за клавіатурою й кнопками миші через Raw
+  Input (навіть з вимкненим автовиправленням) — лише за тим, чи щось натиснуто.
+- Зекономлений час — оцінка того, скільки забрало б виправлення вручну: стерти й набрати
+  заново ≈ 0,3 с на символ, плюс 1 с перемкнути розкладку, а для автовиправлення — ще 1 с,
+  щоб помітити помилку. Тож `ghbdsn` → `привіт` автоматично економить ≈ 3,8 с, гарячою
+  клавішею — ≈ 2,8 с.
 
 ### Інші інструменти
 
@@ -506,7 +554,7 @@ def register(api):
 - **Подвійний клік** — вікно налаштувань.
 - **Правий клік** — меню: **Дії** (усі дії з гарячими клавішами; виконуються для вікна,
   яке було активним до кліку по треї), Увімкнено, Автовиправлення розкладки під час набору,
-  Нагадування 20-20-20, Нагадування про перерву в роботі, Налаштування…, Відкрити config.ini, Перечитати config.ini і плагіни,
+  Нагадування 20-20-20, Нагадування про перерву в роботі, Статистика, Налаштування…, Відкрити config.ini, Перечитати config.ini і плагіни,
   Відкрити папку плагінів, Вихід.
 
 Попереднє активне вікно програма визначає через сповіщення `WinEvent` про зміну активного
@@ -605,7 +653,7 @@ CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, д
 | Антивіруси          | частіше насторожено ставляться до самопакованих exe | рідше                                  |
 | Поширення           | один файл — зручно скопіювати/передати           | треба переносити всю папку                |
 
-В обох варіантах `config.ini`, `autocorrect_exceptions.txt`, `autocorrect_words.txt`, `plugins\` і лог лежать поруч
+В обох варіантах `config.ini`, `autocorrect_exceptions.txt`, `autocorrect_words.txt`, `stats.json`, `plugins\` і лог лежать поруч
 з exe, автозапуск вказує на exe. `build.ps1` зберігає ваші файли там, і для `-OneDir` теж,
 де PyInstaller перестворює всю папку. У `config.ini` він дописує ключі нової версії; якщо
 файлу ще немає — створює його з налаштуваннями за замовчуванням. На час збірки копія цих
@@ -618,9 +666,12 @@ CC BY-SA 4.0, зібрані з OpenSubtitles). Щоб додати мову, д
 Ресурси: у фоні ~25 MB RAM (onefile додатково тримає процес-завантажувач ~10 MB), плюс
 ~10 MB на мовні дані, коли автовиправлення увімкнене. Процесор майже не навантажується:
 жодних хуків клавіатури чи опитування, лише `RegisterHotKey` й одна перевірка таймера на
-хвилину для перерв. Raw Input задіяний у трьох випадках. Події клавіатури читаються лише
+хвилину для перерв. Raw Input задіяний у чотирьох випадках. Події клавіатури читаються лише
 поки увімкнене автовиправлення або утримується модифікатор гарячої клавіші. Кнопки миші
-відстежуються тільки поки набирається слово, бо клік може зсунути курсор. Після 3 хвилин
+відстежуються тільки поки набирається слово, бо клік може зсунути курсор. Протягом 10 с
+після конвертації розкладки гарячою клавішею програма зважає лише на те, чи натиснуто
+клавішу або кнопку миші (навіть з вимкненим автовиправленням), щоб повторне натискання не
+рахувалося в статистиці як нове виправлення. Після 3 хвилин
 без введення програма чекає на перше натискання чи рух миші, щоб точно виміряти тривалість
 паузи (береться лише час цієї події), і одразу перестає слухати. Поки вас немає, подій
 немає, тож це нічого не коштує.
