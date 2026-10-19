@@ -201,13 +201,13 @@ class Config:
         text = _TEMPLATES[lang].format(**self._values())
         if self.plugin_hotkeys:
             text += _PLUGINS_HEADERS[lang] + "".join("%s = %s\n" % item for item in sorted(self.plugin_hotkeys.items()))
-        _write_atomic(path, text)
+        write_atomic(path, text)
 
 
 _GENERAL_KEYS = frozenset(Config.__dataclass_fields__) - {"plugin_hotkeys"}  # ключі секції [general]
 
 
-def _write_atomic(path, text, newline=None):
+def write_atomic(path, text, newline=None):
     """Тимчасовий файл + os.replace, тож при збої старий config.ini лишається цілим."""
     tmp = path + ".tmp"
     try:
@@ -264,7 +264,7 @@ def _append_missing(path, values, missing):
         if not lines[pos - 1].endswith(("\n", "\r")):
             lines[pos - 1] += nl
         lines[pos:pos] = added
-    _write_atomic(path, ("﻿" if bom else "") + "".join(lines), newline="")
+    write_atomic(path, ("﻿" if bom else "") + "".join(lines), newline="")
 
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"

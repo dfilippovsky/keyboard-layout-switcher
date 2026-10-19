@@ -19,6 +19,7 @@ import hotkey as hk
 import icon
 import keyboard_io as kio
 import layouts
+import stats
 import textcase
 import translit
 import winapi as w
@@ -40,13 +41,14 @@ _HOTKEY_ALIAS = 0x1000   # id + 0x1000 — додатковий код тієї 
 FLASH_TIMER_ID = 1
 EYE_TIMER_ID = 2
 EYE_HIDE_TIMER_ID = 3
+RECONVERT_TIMER_ID = 4
 _SWALLOW_ID = 0x3000   # тимчасові «голі» клавіші під час утримання модифікатора
 _FOCUS_TIMEOUT = 1.0   # с — чекати, поки вікно знову стане активним після меню
 _HOLD_TIMEOUT = 10.0   # с без натискань — завершити утримання
 _FLASH_MS = 350          # скільки іконка в треї світиться кольором дії після обробки гарячої клавіші
 WM_TRAY = w.WM_APP + 1
 (ID_ENABLED, ID_SETTINGS, ID_OPEN_INI, ID_RELOAD, ID_EXIT, ID_EYES, ID_AUTOCORRECT, ID_PLUGINS,
- ID_WORK, ID_FORCED) = range(100, 110)
+ ID_WORK, ID_FORCED, ID_STATS) = range(100, 111)
 ID_ACTION_BASE = 1000    # пункт меню «Дії» = ID_ACTION_BASE + номер дії
 # Вікна, які не є «робочими»: панель задач, область сповіщень, робочий стіл
 _SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
@@ -59,6 +61,7 @@ _MAX_WORD_STEPS = 8      # скільки разів Ctrl+Shift+Left шукат�
 _MAX_RESELECT = 5000     # не виділяти назад надто довгий текст
 _PASTE_THRESHOLD = 300   # довший або багаторядковий текст вставляємо через буфер
 _PASTE_SETTLE = 0.3      # дати програмі прочитати буфер перед відновленням
+_RECONVERT_MS = 10_000   # повторна конвертація щойно перетвореного тексту (по колу) не рахується
 
 
 def _looks_like_line_copy(text):
@@ -94,6 +97,8 @@ class App:
         self.tracker = autocorrect.Tracker()
         self.ac_exceptions = autocorrect.load_words(EXCEPTIONS_PATH)
         self.forced_words = autocorrect.ForcedWords(FORCED_PATH)
+        self.stats = stats.Stats()
+        self._last_conv = None  # (вікно, результат) останньої конвертації — див. _count_conversion
         self.raw = {_RAW_KEYBOARD: False, _RAW_MOUSE: False}  # що зараз зареєстровано в Raw Input
         self.ac_tracking = False  # автовиправлення стежить за клавіатурою (Raw Input — ще й для перерв)
         self._raw_buf = (ctypes.c_byte * 64)()  # з запасом: RAWINPUT більший за заголовок + дані
@@ -202,6 +207,7 @@ class App:
                       tr("menu.eyes"))
         w.AppendMenuW(m, w.MF_STRING | (w.MF_CHECKED if self.cfg.work_breaks else 0), ID_WORK,
                       tr("menu.work"))
+        w.AppendMenuW(m, w.MF_STRING, ID_STATS, tr("menu.stats"))
         w.AppendMenuW(m, w.MF_STRING, ID_SETTINGS, tr("menu.settings"))
         w.AppendMenuW(m, w.MF_STRING, ID_OPEN_INI, tr("menu.open_ini"))
         w.AppendMenuW(m, w.MF_STRING, ID_RELOAD, tr("menu.reload"))
@@ -235,6 +241,8 @@ class App:
             self.cfg.work_breaks = not self.cfg.work_breaks
             self.cfg.save()
             self.work.reset()
+        elif cmd == ID_STATS:
+            self.show_stats()
         elif cmd == ID_SETTINGS:
             self.open_settings()
         elif cmd == ID_OPEN_INI:
@@ -498,7 +506,7 @@ class App:
             # натискання ми не враховуємо — беремо стан, у якому їх лишила дія
             self.tracker.sync_mods(vk for vk in kio.SIDED_MODIFIER_VKS if kio.is_down(vk))
             self.tracker.caps = None  # і Caps Lock звіримо заново перед наступним словом
-            self._update_raw_mouse()
+            self._watch_after_conversion()
             # Після обробки: потік одразу повертається до циклу повідомлень,
             # тож WM_TIMER прийде вчасно й іконка світиться рівно _FLASH_MS.
             self.flash(action)
@@ -516,7 +524,7 @@ class App:
         keys = None
         if groups:
             try:
-                keys = kio.PhysicalKeys(self.hwnd, keep=self.ac_tracking)
+                keys = kio.PhysicalKeys(self.hwnd, keep=self.raw[_RAW_KEYBOARD], on_input=self._on_user_input)
             except OSError:
                 log.exception("raw input is unavailable")
         try:
@@ -625,16 +633,58 @@ class App:
             return
         current = layouts.current(w.GetWindowThreadProcessId(fg, None))
         log.debug("layout: fg=%#x layout=%#x", fg, current)
-        dst = None
+        dst = converted = None
 
         def transform(text):
-            nonlocal dst
+            nonlocal dst, converted
             src = layouts.detect_source(text, hkls, current)
             dst = layouts.next_after(src, hkls)
-            return layouts.convert(text, src, dst)
+            conv = layouts.convert(text, src, dst)
+            converted = (text, conv)
+            return conv
 
-        if self._edit_text(transform) and dst and self.cfg.switch_layout:
+        if not self._edit_text(transform):
+            return
+        if dst and self.cfg.switch_layout:
             layouts.switch(fg, dst)
+        if converted and converted[0] != converted[1]:
+            self._count_conversion(fg, *converted)
+
+    def _count_conversion(self, fg, text, conv):
+        """Порахувати конвертацію гарячою клавішею. Повторне натискання на щойно
+        перетвореному тексті (наступна розкладка по колу) — та сама помилка, не нова:
+        той самий текст у тому самому вікні, а між натисканнями — жодної іншої клавіші
+        чи кліку (щоб перейти до іншого поля, без них не обійтися; див. _forget_conversion).
+        Стеження за введенням вмикає on_hotkey після дії."""
+        last = self._last_conv
+        if not (last and last == (fg, text)):
+            self.stats.manual(len(conv))
+        self._last_conv = (fg, conv)
+        w.SetTimer(self.hwnd, RECONVERT_TIMER_ID, _RECONVERT_MS, None)
+        # Кліки — вже зараз: під час утримання модифікаторів (_hold_session) їх
+        # передасть PhysicalKeys; клавіатуру поки тримає він, її підписку — після дії
+        self._update_raw_mouse()
+
+    def _on_user_input(self, vk):
+        """Натиснуто клавішу (vk, не модифікатор) або кнопку миші (None) — фізично."""
+        if vk is None or vk not in self.tracker.ignore_vks:  # ignore_vks — гаряча клавіша розкладки
+            self._forget_conversion()
+
+    def _forget_conversion(self):
+        """Наступна конвертація — уже нове виправлення: користувач щось натиснув або
+        клацнув, минув час, чи за введенням не вдалося стежити."""
+        if self._last_conv is None:
+            return
+        self._last_conv = None
+        w.KillTimer(self.hwnd, RECONVERT_TIMER_ID)
+        if not self.busy:  # під час дії підписку оновить on_hotkey (її тримає PhysicalKeys)
+            self._update_raw_input()
+
+    def _watch_after_conversion(self):
+        """Після дії: поки повтор можливий, стежити за клавіатурою й мишею."""
+        self._update_raw_input()
+        if self._last_conv is not None and not (self.raw[_RAW_KEYBOARD] and self.raw[_RAW_MOUSE]):
+            self._forget_conversion()  # не бачитимемо введення — повтор не розпізнати
 
     def _toggle_case(self, _fg):
         self._edit_text(self.case_cycler.next)
@@ -826,23 +876,23 @@ class App:
         if on:  # мовні дані — заздалегідь, щоб перше виправлення не барилося
             for hkl in layouts.installed():
                 autocorrect.model(autocorrect.lang_of(hkl))
-        self._set_raw(_RAW_KEYBOARD, on or self.away.watching is not None)
+        self._set_raw(_RAW_KEYBOARD, on or self.away.watching is not None or self._last_conv is not None)
         self._update_raw_mouse()
 
     def _update_raw_mouse(self):
         """Клік мишею може перенести курсор, тож поки є набране слово (або виправлення,
-        яке можна скасувати), стежимо й за кнопками миші. Решту часу — ні: рух миші
-        дає сотні подій за секунду (крім очікування повернення користувача — тоді
-        подій немає, а перша ж знімає підписку)."""
+        яке можна скасувати, чи конвертація, яку можна повторити), стежимо й за кнопками
+        миші. Решту часу — ні: рух миші дає сотні подій за секунду (крім очікування
+        повернення користувача — тоді подій немає, а перша ж знімає підписку)."""
         self._set_raw(_RAW_MOUSE, (self.ac_tracking and self.tracker.active)
-                      or self.away.watching is not None)
+                      or self.away.watching is not None or self._last_conv is not None)
 
     def _on_raw_input(self, lparam):
         """Обробити WM_INPUT. Повертає True, якщо це дія користувача, після якої
         передруковувати вже не можна (натиснуто клавішу або кнопку миші)."""
         if self.away.watching is not None:
             self._on_return(w.GetMessageTime())
-        if not self.ac_tracking:
+        if not (self.ac_tracking or self._last_conv is not None):
             return False  # підписка лише заради перерв (або запізніла подія після неї)
         buf = self._raw_buf
         size = ctypes.c_uint(ctypes.sizeof(buf))
@@ -855,7 +905,9 @@ class App:
             buttons = w.RAWINPUT_MOUSE.from_buffer(buf).mouse.ulButtons & 0xFFFF
             if not buttons & w.RI_MOUSE_BUTTONS_DOWN:
                 return False
-            self.tracker.mouse_click()
+            self._on_user_input(None)
+            if self.ac_tracking:
+                self.tracker.mouse_click()
             self._update_raw_mouse()
             return True
         if header.dwType != w.RIM_TYPEKEYBOARD:
@@ -864,6 +916,10 @@ class App:
         vk = kio.sided(kb.VKey, kb.MakeCode, kb.Flags)
         down = not kb.Flags & w.RI_KEY_BREAK
         injected = not header.hDevice
+        if down and not injected and vk not in kio.SIDED_MODIFIER_VKS:
+            self._on_user_input(vk)
+        if not self.ac_tracking:
+            return False
         own = injected and kb.ExtraInformation == kio.OWN_INPUT
         fg = hkl = None
         if down and not injected:
@@ -930,6 +986,7 @@ class App:
             return
         # Лише тепер його можна скасовувати: воно справді надруковане
         self.tracker.correction = correction
+        self.stats.auto(len(correction.typed))
         log.debug("autocorrect: %d chars, layout %#x -> %#x", len(correction.typed),
                   correction.src & 0xFFFFFFFF, correction.dst & 0xFFFFFFFF)
         if self.cfg.switch_layout:
@@ -977,6 +1034,7 @@ class App:
             return
         if not kio.retype(len(correction.fixed) + len(correction.tail), correction.typed + correction.tail):
             return
+        self.stats.undo(len(correction.typed))
         if self.cfg.switch_layout:
             layouts.switch(fg, correction.src)
         if correction.word and correction.word not in self.ac_exceptions:
@@ -989,6 +1047,7 @@ class App:
     # ---------- нагадування 20-20-20 і про перерву ----------
 
     def _eye_tick(self):
+        self.stats.save_if_dirty()
         self._check_away()
         worked = None
         if self.cfg.work_breaks:
@@ -1058,6 +1117,15 @@ class App:
         self.notify(tr("work.text", i18n.format_duration(worked)),
                     title=tr("work.title"), quiet=True, balloon_icon=self.work_icon)
 
+    def show_stats(self):
+        total, today, since = self.stats.summary()
+        w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)  # щоб не закрилося таймером нагадування
+        self.notify(tr("stats.text", i18n.format_times(total["auto"] + total["manual"]),
+                       total["auto"], total["manual"], i18n.format_saved(total["seconds"]),
+                       i18n.format_times(today["auto"] + today["manual"]),
+                       i18n.format_saved(today["seconds"]), i18n.format_date(since)),
+                    title=tr("stats.title"), quiet=True)
+
     def _hide_eye_break(self):
         w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)
         self._tray(w.NIM_MODIFY, info="")
@@ -1079,6 +1147,9 @@ class App:
             if msg == w.WM_TIMER and wparam == EYE_TIMER_ID:
                 self._eye_tick()
                 return 0
+            if msg == w.WM_TIMER and wparam == RECONVERT_TIMER_ID:
+                self._forget_conversion()
+                return 0
             if msg == w.WM_TIMER and wparam == EYE_HIDE_TIMER_ID:
                 self._hide_eye_break()
                 return 0
@@ -1094,7 +1165,10 @@ class App:
                 return 0
             if msg == w.WM_SETTINGCHANGE:  # зміна теми — перемальовуємо іконку
                 self.refresh_tray()
+            elif msg == w.WM_ENDSESSION and wparam:  # вихід із Windows: WM_DESTROY може не прийти
+                self.stats.save_if_dirty()
             elif msg == w.WM_DESTROY:
+                self.stats.save_if_dirty()
                 self._tray(w.NIM_DELETE)
                 if self._win_event_hook:
                     w.UnhookWinEvent(self._win_event_hook)

@@ -24,6 +24,7 @@ _STRINGS = {
         "menu.autocorrect": "Автовиправлення розкладки під час набору",
         "menu.eyes": "Нагадування 20-20-20 для очей",
         "menu.work": "Нагадування про перерву в роботі",
+        "menu.stats": "Статистика",
         "menu.settings": "Налаштування…",
         "menu.open_ini": "Відкрити config.ini",
         "menu.reload": "Перечитати config.ini і плагіни",
@@ -45,6 +46,9 @@ _STRINGS = {
         "eye.text": "Подивіться 20 секунд на щось далеко (≈6 м) - очі відпочинуть.",
         "work.title": "Час на перерву",
         "work.text": "Ти вже %s без перерви. Встань, пройдися, розімнися кілька хвилин.",
+        "stats.title": "Статистика",
+        "stats.text": ("Розкладку виправлено %s: автоматично — %d, гарячою клавішею — %d. "
+                       "Зекономлено ≈ %s.\nСьогодні: %s, ≈ %s.\nВідлік з %s."),
         # розбір гарячих клавіш
         "hotkey.empty_part": "порожня частина в «%s»",
         "hotkey.bad_modifier": "невідомий модифікатор «%s»",
@@ -110,6 +114,7 @@ _STRINGS = {
         "menu.autocorrect": "Auto-correct layout while typing",
         "menu.eyes": "20-20-20 eye breaks",
         "menu.work": "Work break reminders",
+        "menu.stats": "Statistics",
         "menu.settings": "Settings…",
         "menu.open_ini": "Open config.ini",
         "menu.reload": "Reload config.ini and plugins",
@@ -131,6 +136,9 @@ _STRINGS = {
         "work.title": "Time for a break",
         "work.text": "You've been working for %s without a break. Stand up, walk around, stretch "
                      "for a few minutes.",
+        "stats.title": "Statistics",
+        "stats.text": ("Layout fixed %s: automatically %d, by hotkey %d. Time saved ≈ %s.\n"
+                       "Today: %s, ≈ %s.\nCounting since %s."),
         "hotkey.empty_part": "empty part in “%s”",
         "hotkey.bad_modifier": "unknown modifier “%s”",
         "hotkey.bad_key": "unknown key “%s”",
@@ -246,3 +254,28 @@ def format_duration(seconds):
         h = "%d hour%s" % (hours, "" if hours == 1 else "s")
         m = "%d minute%s" % (minutes, "" if minutes == 1 else "s")
     return " ".join(([h] if hours else []) + ([m] if minutes or not hours else []))
+
+
+def format_times(n):
+    """«5 разів» / «5 times»."""
+    if _current == "uk":
+        return "%d %s" % (n, _plural_uk(n, "раз", "рази", "разів"))
+    return "%d time%s" % (n, "" if n == 1 else "s")
+
+
+def format_saved(seconds):
+    """Менше хвилини — секунди з десятими («3,8 с» / «3.8 s»), інакше — format_duration,
+    округлене до хвилини."""
+    if seconds < 59.95:
+        if _current == "uk":
+            return "%s с" % format(round(seconds, 1), "g").replace(".", ",")
+        return "%s s" % format(round(seconds, 1), "g")
+    return format_duration(seconds + 30)
+
+
+def format_date(iso):
+    """'2026-10-19' -> «19.10.2026» / «2026-10-19»."""
+    parts = iso.split("-")
+    if _current == "uk" and len(parts) == 3:
+        return ".".join(reversed(parts))
+    return iso

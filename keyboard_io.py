@@ -197,11 +197,14 @@ class PhysicalKeys:
     SendInput (hDevice = 0), ігноруються, тож видно, що користувач реально тримає,
     навіть коли ми логічно відпустили модифікатори."""
 
-    def __init__(self, hwnd, keep=False):
+    def __init__(self, hwnd, keep=False, on_input=None):
         """keep — Raw Input клавіатури зареєстровано й поза сеансом (автовиправлення
-        розкладки), тож close() його не знімає."""
+        розкладки), тож close() його не знімає. on_input(vk) — для дій користувача, які
+        poll() забирає з черги: натискання клавіші, що не є модифікатором, і кнопки миші
+        (vk = None; якщо на мишу підписано)."""
         self.hwnd = hwnd
         self.keep = keep
+        self.on_input = on_input
         self._register(w.RIDEV_INPUTSINK, hwnd)
         # Знімок після реєстрації: усе, що зміниться далі, прийде подіями
         self.down = {vk for vk in SIDED_MODIFIER_VKS if is_down(vk)}
@@ -245,13 +248,25 @@ class PhysicalKeys:
             got = w.GetRawInputData(msg.lParam, w.RID_INPUT, buf, ctypes.byref(size),
                                     ctypes.sizeof(w.RAWINPUTHEADER))
             w.DefWindowProcW(self.hwnd, w.WM_INPUT, msg.wParam, msg.lParam)
-            if got in (0, 0xFFFFFFFF) or rec.header.dwType != w.RIM_TYPEKEYBOARD:
+            if got in (0, 0xFFFFFFFF):
                 log.debug("raw input: unreadable event (%d)", got)
+                continue
+            if rec.header.dwType == w.RIM_TYPEMOUSE:
+                buttons = w.RAWINPUT_MOUSE.from_buffer(buf).mouse.ulButtons & 0xFFFF
+                if buttons & w.RI_MOUSE_BUTTONS_DOWN and self.on_input:
+                    self.on_input(None)
+                continue
+            if rec.header.dwType != w.RIM_TYPEKEYBOARD:
                 continue
             kb = rec.keyboard
             vk = sided(kb.VKey, kb.MakeCode, kb.Flags)
+            pressed = not kb.Flags & w.RI_KEY_BREAK
             log.debug("raw input: vk=%#x make=%#x flags=%#x device=%s", kb.VKey, kb.MakeCode, kb.Flags,
                       rec.header.hDevice)
-            if not rec.header.hDevice or vk not in SIDED_MODIFIER_VKS:
-                continue  # наші SendInput або не модифікатор
-            self._events.append((msg.time, vk, not kb.Flags & w.RI_KEY_BREAK))
+            if not rec.header.hDevice:
+                continue  # наші SendInput
+            if vk not in SIDED_MODIFIER_VKS:
+                if pressed and self.on_input:
+                    self.on_input(vk)
+                continue
+            self._events.append((msg.time, vk, pressed))
