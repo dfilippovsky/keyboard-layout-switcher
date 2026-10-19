@@ -73,7 +73,7 @@ _STRINGS = {
         "ui.hotkeys": "Гарячі клавіші",
         "ui.hk_layout": "Розкладка:",
         "ui.hk_case": "Регістр (aA, camelCase…):",
-        "ui.hk_translit": "Транслітерація (Привіт → Pryvit):",
+        "ui.hk_translit": "Транслітерація (Привіт ⇄ Pryvit):",
         "ui.hk_hint": "Клацніть у поле й натисніть комбінацію; Backspace — вимкнути\n"
                       "(для регістру й транслітерації)",
         "ui.plugins": "Плагіни",
@@ -159,7 +159,7 @@ _STRINGS = {
         "ui.hotkeys": "Hotkeys",
         "ui.hk_layout": "Layout:",
         "ui.hk_case": "Case (aA, camelCase…):",
-        "ui.hk_translit": "Transliteration (Привіт → Pryvit):",
+        "ui.hk_translit": "Transliteration (Привіт ⇄ Pryvit):",
         "ui.hk_hint": "Click a field and press a combination; Backspace turns it off\n"
                       "(for case and transliteration)",
         "ui.plugins": "Plugins",

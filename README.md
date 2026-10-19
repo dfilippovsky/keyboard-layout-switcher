@@ -94,11 +94,27 @@ the layout conversion, including reselecting the result:
 |----------------|--------|------------|
 | `Pause`        | Convert to the next keyboard layout | blue |
 | `Alt+Pause`    | **Change case** in a cycle: `lower` → `UPPER` → `Title` → `camelCase` → `snake_case` → `kebab-case` | green |
-| `Ctrl+Pause`   | **Transliterate** Ukrainian into Latin using the official system (Cabinet of Ministers Resolution No. 55, 2010): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka` | purple |
+| `Ctrl+Pause`   | **Transliterate** Ukrainian into Latin using the official system (Cabinet of Ministers Resolution No. 55, 2010): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka`. **And back:** Latin text becomes Cyrillic, `Pryvit` → `Привіт` (see below) | purple |
 | `Shift+Pause`  | **Ukrainian typography** (plugin `ua_typography`): `'` → `ʼ` inside words, `"…"` → `«…»` (nested `„…“`), ` - ` → ` — ` with a non-breaking space before it, `...` → `…`, repeated spaces → one | pink |
 
 Plugins add more actions (see [Plugins](#plugins)). All actions are also in the tray menu
 under **Actions**.
+
+**Reverse transliteration.** The transliteration hotkey picks the direction from the text:
+if it has Cyrillic letters, it becomes Latin; if it is Latin only, it becomes Cyrillic.
+Pressing it again on text it has just converted gives back exactly what was there (from
+memory), so `Привіт` → `Pryvit` → `Привіт` and so on.
+
+The official Latin spelling loses information: `i` stands for `і`, `ї` or `й`, `ia` for
+`я` or `ія`, and the soft sign and apostrophe are dropped. So for Latin typed by hand the app
+tries the possible spellings. First it looks for a real word in the same dictionary that
+auto-correct uses (`Lviv` → `Львів`, `piat` → `п'ять`), then for the spelling
+that looks most like Ukrainian. It also applies spelling rules: `-ii` at the end is `-ій`,
+the apostrophe goes after `б п в м ф` before `я ю є ї`, and `-skyi` is `-ський`. About 98%
+of common words come back right. Rare names may lose the soft sign (`Olha` → `Олга`).
+Words with `c`, `j`, `q`, `w` or `x` (except `ch` and `shch`) are taken for English and left
+alone. If auto-correct is off, the language data (~10 MB) is loaded the first time you
+convert Latin text.
 
 Case changing works out the current style and moves to the next one. Pressing the hotkey
 again on the result keeps going round from the original text, so `kebab-case` → `lower`
@@ -455,11 +471,27 @@ plays and the reason is logged) if:
 |--------------------------|-----|--------------|
 | `Pause`      | Конвертація в наступну розкладку | синій |
 | `Alt+Pause`  | **Регістр** по колу: `lower` → `UPPER` → `Title` → `camelCase` → `snake_case` → `kebab-case` | зелений |
-| `Ctrl+Pause` | **Транслітерація** українського тексту латиницею за офіційною системою (постанова КМУ № 55 від 2010 р.): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka` | фіолетовий |
+| `Ctrl+Pause` | **Транслітерація** українського тексту латиницею за офіційною системою (постанова КМУ № 55 від 2010 р.): `Привіт` → `Pryvit`, `Згорани` → `Zghorany`, `Знам'янка` → `Znamianka`. **І назад:** латиниця стає кирилицею, `Pryvit` → `Привіт` (див. нижче) | фіолетовий |
 | `Shift+Pause` | **Українська типографіка** (плагін `ua_typography`): `'` → `ʼ` усередині слів, `"…"` → `«…»` (вкладені `„…“`), ` - ` → ` — ` з нерозривним пробілом перед ним, `...` → `…`, кілька пробілів → один | рожевий |
 
 Плагіни додають інші дії (див. [Плагіни](#plugins-uk)). Усі дії є й у меню трею, у пункті
 **Дії**.
+
+**Зворотна транслітерація.** Гаряча клавіша транслітерації сама визначає напрямок: текст
+із кириличними літерами стає латиницею, а суто латинський — кирилицею. Повторне натискання
+на щойно перетвореному тексті повертає точно те, що було (з пам'яті): `Привіт` → `Pryvit` →
+`Привіт` і так далі.
+
+Офіційна латиниця губить інформацію: `i` — це `і`, `ї` або `й`, `ia` — `я` або `ія`, а м'який
+знак і апостроф не передаються. Тому для латиниці, набраної вручну, програма перебирає
+можливі написання. Спершу шукає справжнє слово в тому самому словнику, що й автовиправлення
+(`Lviv` → `Львів`, `piat` → `п'ять`), потім — написання, найбільш схоже на
+українське. Також застосовуються правила правопису: `-ii` у кінці — `-ій`, апостроф після
+`б п в м ф` перед `я ю є ї`, `-skyi` — `-ський`. Близько 98% поширених слів повертаються
+правильно. У рідкісних назвах може загубитися м'який знак (`Olha` → `Олга`). Слова з `c`,
+`j`, `q`, `w` чи `x` (крім `ch` і `shch`) вважаються англійськими й лишаються як є. Якщо
+автовиправлення вимкнене, мовні дані (~10 MB) завантажуються при першому перетворенні
+латиниці.
 
 Регістр визначає поточний стиль тексту й переходить до наступного. Повторні натискання
 на результаті йдуть далі по колу від початкового тексту, тож `kebab-case` → `lower`

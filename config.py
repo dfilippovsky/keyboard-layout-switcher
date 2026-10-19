@@ -34,7 +34,7 @@ hotkey = {hotkey}
 ; Зміна регістру по колу: lower → UPPER → Title → camelCase → snake_case → kebab-case
 ; (порожньо — вимкнено)
 case_hotkey = {case_hotkey}
-; Транслітерація українського тексту латиницею (порожньо — вимкнено)
+; Транслітерація: кирилиця → латиниця, латиниця → кирилиця (порожньо — вимкнено)
 translit_hotkey = {translit_hotkey}
 ; Реагувати на гарячі клавіші (true/false)
 enabled = {enabled}
@@ -74,7 +74,7 @@ hotkey = {hotkey}
 ; Case cycling: lower → UPPER → Title → camelCase → snake_case → kebab-case
 ; (empty — off)
 case_hotkey = {case_hotkey}
-; Transliteration of Ukrainian text into Latin letters (empty — off)
+; Transliteration: Cyrillic → Latin, Latin → Cyrillic (empty — off)
 translit_hotkey = {translit_hotkey}
 ; React to the hotkeys (true/false)
 enabled = {enabled}
