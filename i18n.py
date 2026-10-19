@@ -47,8 +47,15 @@ _STRINGS = {
         "work.title": "Час на перерву",
         "work.text": "Ти вже %s без перерви. Встань, пройдися, розімнися кілька хвилин.",
         "stats.title": "Статистика",
-        "stats.text": ("Розкладку виправлено %s: автоматично — %d, гарячою клавішею — %d. "
-                       "Зекономлено ≈ %s.\nСьогодні: %s, ≈ %s.\nВідлік з %s."),
+        "stats.text": ("Розкладку виправлено: %s\n"
+                       "Автоматично: %d\n"
+                       "Гарячою клавішею: %d\n"
+                       "Зекономлено: ≈ %s\n"
+                       "\n"
+                       "Сьогодні виправлено: %s\n"
+                       "Сьогодні зекономлено: ≈ %s\n"
+                       "\n"
+                       "Відлік з %s"),
         # розбір гарячих клавіш
         "hotkey.empty_part": "порожня частина в «%s»",
         "hotkey.bad_modifier": "невідомий модифікатор «%s»",
@@ -137,8 +144,15 @@ _STRINGS = {
         "work.text": "You've been working for %s without a break. Stand up, walk around, stretch "
                      "for a few minutes.",
         "stats.title": "Statistics",
-        "stats.text": ("Layout fixed %s: automatically %d, by hotkey %d. Time saved ≈ %s.\n"
-                       "Today: %s, ≈ %s.\nCounting since %s."),
+        "stats.text": ("Layout fixed: %s\n"
+                       "Automatically: %d\n"
+                       "By hotkey: %d\n"
+                       "Time saved: ≈ %s\n"
+                       "\n"
+                       "Fixed today: %s\n"
+                       "Saved today: ≈ %s\n"
+                       "\n"
+                       "Counting since %s"),
         "hotkey.empty_part": "empty part in “%s”",
         "hotkey.bad_modifier": "unknown modifier “%s”",
         "hotkey.bad_key": "unknown key “%s”",

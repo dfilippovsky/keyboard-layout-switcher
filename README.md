@@ -67,7 +67,7 @@ Turn it on or off in the tray menu or the settings (`autocorrect`).
 
 ### Statistics
 
-Tray menu → **Statistics** shows how many times the layout was fixed (automatically while
+Tray menu → **Statistics** opens a window that shows, one per line, how many times the layout was fixed (automatically while
 typing and with the hotkey), how much time that saved, the same for today, and since when
 it has been counting. Only counters are kept, never text: `stats.json` next to the app,
 written once a minute and on exit. To start over, delete the file, even while the app is
@@ -443,7 +443,7 @@ plays and the reason is logged) if:
 
 ### Статистика
 
-Меню трею → **Статистика** показує, скільки разів виправлено розкладку (автоматично під
+Меню трею → **Статистика** відкриває вікно, де по рядку на кожен показник видно, скільки разів виправлено розкладку (автоматично під
 час набору і гарячою клавішею), скільки часу це зекономило, те саме за сьогодні і з якого
 дня йде відлік. Зберігаються лише лічильники, без жодного тексту: `stats.json` поруч із
 програмою, записується раз на хвилину і при виході. Щоб почати з нуля — видаліть файл,

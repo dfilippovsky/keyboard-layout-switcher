@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 
 import actions
@@ -69,6 +70,13 @@ def _looks_like_line_copy(text):
     return text.endswith("\n") and text.count("\n") == 1
 
 
+def _own_window(hwnd):
+    """Вікно цього процесу: приховане головне, налаштування, статистика."""
+    pid = ctypes.c_ulong()
+    w.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value == os.getpid()
+
+
 def _abort(reason):
     """Перервати конвертацію, нічого не змінюючи в тексті."""
     log.warning("conversion aborted: %s", reason)
@@ -99,6 +107,7 @@ class App:
         self.ac_exceptions = autocorrect.load_words(EXCEPTIONS_PATH)
         self.forced_words = autocorrect.ForcedWords(FORCED_PATH)
         self.stats = stats.Stats()
+        self.stats_open = False  # вікно статистики вже показано
         self._last_conv = None  # (вікно, результат) останньої конвертації — див. _count_conversion
         self.raw = {_RAW_KEYBOARD: False, _RAW_MOUSE: False}  # що зараз зареєстровано в Raw Input
         self.ac_tracking = False  # автовиправлення стежить за клавіатурою (Raw Input — ще й для перерв)
@@ -278,9 +287,7 @@ class App:
         стіл і не вікна самої програми: для нього виконуються дії з меню трею."""
         if not hwnd:
             return
-        pid = ctypes.c_ulong()
-        w.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if pid.value != os.getpid() and w.class_name(hwnd) not in _SHELL_CLASSES:
+        if not _own_window(hwnd) and w.class_name(hwnd) not in _SHELL_CLASSES:
             self.last_window = hwnd
 
     # ---------- дії ----------
@@ -485,8 +492,8 @@ class App:
         if self.busy or action not in self.actions or not (from_menu or self.cfg.enabled):
             return
         fg = fg or w.GetForegroundWindow()
-        if not fg or fg == self.hwnd:
-            return
+        if not fg or _own_window(fg):
+            return  # наші вікна (статистика тощо): копіювати й передруковувати там нічого
         # Текст зараз зміниться — набране до цього вже не відповідає полю
         correction, correction_fg = self.tracker.correction, self.tracker.fg
         self.tracker.reset()
@@ -999,10 +1006,8 @@ class App:
     def _can_correct(self, fg, hkl):
         if self.busy or not fg or not hkl:
             return False
-        pid = ctypes.c_ulong()
-        w.GetWindowThreadProcessId(fg, ctypes.byref(pid))
-        if pid.value == os.getpid():
-            return False  # наші власні вікна (налаштування)
+        if _own_window(fg):
+            return False  # наші власні вікна (налаштування, статистика)
         excluded = self.cfg.excluded_apps()
         if excluded and w.process_name(fg).lower() in excluded:
             return False
@@ -1119,13 +1124,25 @@ class App:
                     title=tr("work.title"), quiet=True, balloon_icon=self.work_icon)
 
     def show_stats(self):
+        """Звичайне вікно повідомлення: сповіщення в треї показує лише ~4 рядки. Вікно —
+        в окремому потоці, щоб не блокувати цикл повідомлень (гарячі клавіші, таймери)."""
+        if self.stats_open:
+            return
         total, today, since = self.stats.summary()
-        w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)  # щоб не закрилося таймером нагадування
-        self.notify(tr("stats.text", i18n.format_times(total["auto"] + total["manual"]),
-                       total["auto"], total["manual"], i18n.format_saved(total["seconds"]),
-                       i18n.format_times(today["auto"] + today["manual"]),
-                       i18n.format_saved(today["seconds"]), i18n.format_date(since)),
-                    title=tr("stats.title"), quiet=True)
+        text = tr("stats.text", i18n.format_times(total["auto"] + total["manual"]),
+                  total["auto"], total["manual"], i18n.format_saved(total["seconds"]),
+                  i18n.format_times(today["auto"] + today["manual"]),
+                  i18n.format_saved(today["seconds"]), i18n.format_date(since))
+
+        def run():
+            try:
+                w.MessageBoxW(None, text, tr("stats.title"),
+                              w.MB_ICONINFORMATION | w.MB_SETFOREGROUND | w.MB_TOPMOST)
+            finally:
+                self.stats_open = False
+
+        self.stats_open = True
+        threading.Thread(target=run, name="stats", daemon=True).start()
 
     def _hide_eye_break(self):
         w.KillTimer(self.hwnd, EYE_HIDE_TIMER_ID)
