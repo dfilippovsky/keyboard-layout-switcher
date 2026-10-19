@@ -101,12 +101,13 @@ class LanguageModel:
         if core is None:
             return -math.inf
         padded = "^^" + core + "$"
-        total = 0.0
-        for i in range(len(padded) - 2):
-            tri = padded[i:i + 3]
-            p = (self.trigrams.get(tri, 0) + _SMOOTHING) / (self.contexts.get(tri[:2], 0) + _SMOOTHING * self._vocab)
-            total += math.log(p)
+        total = sum(self.logp(padded[i:i + 3]) for i in range(len(padded) - 2))
         return total / (len(padded) - 2)
+
+    def logp(self, tri):
+        """Лог-імовірність третьої літери триграми після перших двох (^ — початок, $ — кінець слова)."""
+        return math.log((self.trigrams.get(tri, 0) + _SMOOTHING)
+                        / (self.contexts.get(tri[:2], 0) + _SMOOTHING * self._vocab))
 
 
 def _has_prefix(sorted_words, prefix):

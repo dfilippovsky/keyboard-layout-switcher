@@ -89,6 +89,7 @@ class App:
         self.flashing = None     # колір, яким зараз світиться іконка
         self.actions = {}        # номер -> actions.Action
         self.case_cycler = textcase.CaseCycler()
+        self.translit = translit.Transliterator(lambda: autocorrect.model("uk"))
         self.away = eyecare.BreakDetector()
         self.eyes = eyecare.EyeBreaks()
         self.eye_icon = None
@@ -690,7 +691,7 @@ class App:
         self._edit_text(self.case_cycler.next)
 
     def _transliterate(self, _fg):
-        self._edit_text(translit.transliterate)
+        self._edit_text(self.translit.next)
 
     def _edit_text(self, transform):
         """Замінити виділений текст (або останнє слово перед курсором) на transform(текст).
