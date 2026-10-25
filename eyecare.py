@@ -12,8 +12,6 @@ import winreg
 import winapi as w
 
 TICK_MS = 60_000                 # як часто перевіряти
-_IDLE_RESET = 5 * 60             # стільки без введення = перерва вже була
-_WATCH_AFTER = _IDLE_RESET - 2 * TICK_MS // 1000  # з такої бездіяльності чекати на повернення
 WORK_REPEAT = 30 * 60            # якщо перерви так і не було — нагадати знову через стільки
 _QUNS_ACCEPTS_NOTIFICATIONS = 5
 _QUNS_FULLSCREEN = (2, 3, 4)     # BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE
@@ -35,6 +33,13 @@ def _elapsed_ms(now, then):
 def idle_seconds():
     ticks = _input_ticks()
     return _elapsed_ms(*ticks) / 1000.0 if ticks else 0.0
+
+
+def _watch_after(idle_minutes):
+    """З такої бездіяльності (с) чекати на повернення: за 2 перевірки до порогу,
+    але не раніше ніж через одну — щоб не стежити за введенням постійно."""
+    tick = TICK_MS // 1000
+    return max(tick, idle_minutes * 60 - 2 * tick)
 
 
 def notifications_blocked():
@@ -95,11 +100,11 @@ def call_in_progress():
 
 
 class BreakDetector:
-    """Чи була перерва: _IDLE_RESET без введення або сон.
+    """Чи була перерва: idle_minutes без введення або сон.
 
     GetLastInputInfo пам'ятає лише останнє введення: коли користувач повернувся,
     тривалість паузи перед цим уже не дізнатися, а будь-яка перевірка за таймером
-    може запізнитися. Тому, коли бездіяльність перевищує _WATCH_AFTER, програма
+    може запізнитися. Тому, коли бездіяльність перевищує _watch_after(), програма
     підписується на Raw Input клавіатури й миші (watch()); перше ж введення приходить
     як повідомлення з часом, коли воно сталося (GetMessageTime), — returned(час)
     порівнює його з часом останнього введення перед паузою. Поки користувача немає,
@@ -110,16 +115,16 @@ class BreakDetector:
         self.last_check = time.monotonic()
         self.watching = None  # GetTickCount останнього введення перед паузою, поки чекаємо на повернення
 
-    def observe(self):
-        """Викликати щохвилини. True — перерва вже є: сон або _IDLE_RESET без введення зараз."""
+    def observe(self, idle_minutes):
+        """Викликати щохвилини. True — перерва вже є: сон або idle_minutes без введення зараз."""
         now = time.monotonic()
         slept = now - self.last_check > 3 * TICK_MS / 1000
         self.last_check = now
-        return slept or idle_seconds() >= _IDLE_RESET
+        return slept or idle_seconds() >= idle_minutes * 60
 
     @staticmethod
-    def should_watch():
-        return idle_seconds() >= _WATCH_AFTER
+    def should_watch(idle_minutes):
+        return idle_seconds() >= _watch_after(idle_minutes)
 
     def watch(self):
         ticks = _input_ticks()
@@ -134,12 +139,12 @@ class BreakDetector:
             return ticks[1]
         return None
 
-    def returned(self, input_tick):
+    def returned(self, input_tick, idle_minutes):
         """Перше введення після паузи (input_tick — його GetTickCount). True — пауза
-        тривала щонайменше _IDLE_RESET."""
+        тривала щонайменше idle_minutes."""
         gap = _elapsed_ms(input_tick & 0xFFFFFFFF, self.watching)
         self.watching = None
-        return _IDLE_RESET * 1000 <= gap < 0x80000000  # «від'ємна» різниця — не пауза
+        return idle_minutes * 60_000 <= gap < 0x80000000  # «від'ємна» різниця — не пауза
 
     def stop(self):
         self.watching = None
@@ -166,7 +171,7 @@ class EyeBreaks(_Tracker):
 
 
 class WorkBreaks(_Tracker):
-    """Безперервна робота: відлік від останньої перерви (_IDLE_RESET без введення або сон)."""
+    """Безперервна робота: відлік від останньої перерви (кілька хвилин без введення або сон)."""
 
     def reset(self):
         super().reset()

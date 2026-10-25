@@ -1069,16 +1069,16 @@ class App:
             self.show_work_break(worked)
 
     def _check_away(self):
-        """Перерва (5 хв без введення або сон) — відлік обох нагадувань заново. Щоб не
-        пропустити паузу, яка закінчиться між перевірками, після 3 хв бездіяльності
-        чекаємо на перше введення (_watch_away)."""
-        if self.away.observe():
+        """Перерва (break_idle_minutes без введення або сон) — відлік обох нагадувань
+        заново. Щоб не пропустити паузу, яка закінчиться між перевірками, незадовго
+        до порогу чекаємо на перше введення (_watch_away)."""
+        if self.away.observe(self.cfg.break_idle_minutes):
             self._took_break()
         if self.away.watching is not None:
             stale = self.away.stale()
             if stale is not None:  # введення пройшло повз підписку (сенсорний екран, перо)
                 self._on_return(stale)
-        elif (self.cfg.eye_breaks or self.cfg.work_breaks) and self.away.should_watch():
+        elif (self.cfg.eye_breaks or self.cfg.work_breaks) and self.away.should_watch(self.cfg.break_idle_minutes):
             self._watch_away()
 
     def _took_break(self):
@@ -1100,9 +1100,9 @@ class App:
             self._on_return(stale)
 
     def _on_return(self, input_tick):
-        """Перше введення після бездіяльності: пауза ≥ 5 хв — перерва. Підписку
+        """Перше введення після бездіяльності: пауза ≥ break_idle_minutes — перерва. Підписку
         повертаємо до тієї, що потрібна автовиправленню."""
-        if self.away.returned(input_tick):
+        if self.away.returned(input_tick, self.cfg.break_idle_minutes):
             log.debug("break detected on return")
             self._took_break()
         self._update_raw_input()
