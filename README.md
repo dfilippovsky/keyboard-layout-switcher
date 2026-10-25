@@ -175,12 +175,12 @@ def register(api):
 to look at something about 6 m away for 20 seconds. It closes by itself after 5 seconds
 (`eye_break_popup_seconds`). It does not show up while a fullscreen app, presentation or
 Do Not Disturb is active, or while the microphone or camera is in use (a call). In those cases
-it waits until they end. If you step away from the computer for 5 minutes (or it sleeps),
+it waits until they end. If you step away from the computer for 5 minutes by default (`break_idle_minutes`, or it sleeps),
 the countdown starts over. You can turn it on or off from the tray menu.
 
 **Work breaks.** After 2 hours of continuous work (`work_break_minutes`) a notification says
 “Ти вже 2 години без перерви” (“You've been working for 2 hours without a break”). Continuous
-work is measured from idle data: 5 minutes without keyboard or mouse input, or sleep, counts
+work is measured from idle data: 5 minutes by default (`break_idle_minutes`) without keyboard or mouse input, or sleep, counts
 as a break and restarts the count. If you keep working, it reminds you again every 30 minutes.
 It follows the same quiet rules as eye breaks (fullscreen, Do Not Disturb, calls). It stays
 until Windows hides it, and it has its own icon and color so you can tell it from eye breaks.
@@ -221,7 +221,8 @@ and press the combination; `Backspace` clears it and turns the action off; the l
 hotkey cannot be cleared),
 enable/disable, layout switching, reselecting converted text, auto-correct while typing
 and the programs where it is off, **start with Windows**, the copy timeout, eye break
-reminders with their interval, and work break reminders with their threshold.
+reminders with their interval, and work break reminders with their threshold and how long
+an idle pause must be to count as a break.
 
 Everything is stored in `config.ini` next to `main.py` / the exe (created on first run):
 
@@ -242,6 +243,7 @@ Everything is stored in `config.ini` next to `main.py` / the exe (created on fir
 | `eye_break_popup_seconds` | `5` | How long the notification stays before closing itself, in seconds (0–120; `0` lets Windows decide). |
 | `work_breaks`     | `true`   | Remind to take a break after long continuous work. |
 | `work_break_minutes` | `120` | Minutes of continuous work before the reminder (15–480); then every 30 minutes. |
+| `break_idle_minutes` | `5` | Minutes without keyboard and mouse that count as a break (2–60); after it both reminders start over. |
 
 The `[plugins]` section holds plugin hotkey overrides: `<action id> = <combination>` (an
 empty value turns the hotkey off), e.g. `lines.sort = Ctrl+Alt+S`.
@@ -551,12 +553,12 @@ def register(api):
 нагадує подивитися 20 секунд на щось на відстані ~6 м. Закривається саме через 5 секунд
 (`eye_break_popup_seconds`). Не з'являється, поки відкрито повноекранну програму чи
 презентацію, увімкнено «Не турбувати» або зайнятий мікрофон чи камера (дзвінок). Тоді
-нагадування чекає, доки це закінчиться. Якщо ви відійшли від комп'ютера на 5 хвилин (або
+нагадування чекає, доки це закінчиться. Якщо ви відійшли від комп'ютера на 5 хвилин (за замовчуванням, `break_idle_minutes`; або
 він спав), відлік починається заново. Вмикається й вимикається в меню трею.
 
 **Перерви в роботі.** Після 2 годин безперервної роботи (`work_break_minutes`) сповіщення
 нагадує: «Ти вже 2 години без перерви». Безперервну роботу визначаємо за даними про
-бездіяльність: 5 хвилин без клавіатури й миші (або сон комп'ютера) вважаються перервою, і
+бездіяльність: 5 хвилин (за замовчуванням, `break_idle_minutes`) без клавіатури й миші (або сон комп'ютера) вважаються перервою, і
 відлік починається заново. Якщо перерви так і не було, нагадування повторюється кожні
 30 хвилин. Правила тиші ті самі, що й для очей (повноекранний режим, «Не турбувати»,
 дзвінки). Саме не закривається (лише як вирішить Windows) і має власну іконку й колір,
@@ -600,7 +602,8 @@ def register(api):
 очистити не можна),
 увімкнення, перемикання розкладки, повторне виділення, автовиправлення під час набору
 і програми, де воно вимкнене, **запуск разом з Windows**, затримка очікування копіювання,
-нагадування для очей та їхній інтервал, нагадування про перерву в роботі та його поріг.
+нагадування для очей та їхній інтервал, нагадування про перерву в роботі, його поріг і скільки хвилин бездіяльності
+вважати перервою.
 
 Усе зберігається в `config.ini` поруч із `main.py` / exe (створюється при першому запуску):
 
@@ -621,6 +624,7 @@ def register(api):
 | `eye_break_popup_seconds` | `5`      | Через скільки секунд сповіщення закривається само (0–120; `0` — як вирішить Windows). |
 | `work_breaks`     | `true`           | Нагадування про перерву після тривалої безперервної роботи. |
 | `work_break_minutes` | `120`         | Скільки хвилин безперервної роботи до нагадування (15–480); далі — кожні 30 хв. |
+| `break_idle_minutes` | `5`           | Скільки хвилин без клавіатури й миші вважати перервою (2–60); після неї відлік обох нагадувань — заново. |
 
 У секції `[plugins]` зберігаються перевизначення гарячих клавіш плагінів:
 `<id дії> = <комбінація>` (порожнє значення вимикає клавішу), наприклад

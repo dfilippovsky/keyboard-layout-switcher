@@ -56,10 +56,13 @@ eye_break_minutes = {eye_break_minutes}
 ; Через скільки секунд сповіщення закривається само (0 — як вирішить Windows)
 eye_break_popup_seconds = {eye_break_popup_seconds}
 ; Нагадування про перерву після тривалої роботи без перерви (true/false).
-; Перервою вважається 5 хв без клавіатури й миші або сон комп'ютера.
+; Перервою вважається break_idle_minutes без клавіатури й миші або сон комп'ютера.
 work_breaks = {work_breaks}
 ; Скільки хвилин безперервної роботи до нагадування (15–480); далі — кожні 30 хв
 work_break_minutes = {work_break_minutes}
+; Скільки хвилин без клавіатури й миші вважати перервою (2–60): після неї
+; відлік обох нагадувань починається заново
+break_idle_minutes = {break_idle_minutes}
 """,
     "en": """\
 ; Keyboard Layout Switcher — settings.
@@ -96,10 +99,13 @@ eye_break_minutes = {eye_break_minutes}
 ; After how many seconds the notification closes by itself (0 — let Windows decide)
 eye_break_popup_seconds = {eye_break_popup_seconds}
 ; Remind to take a break after long work without one (true/false).
-; A break is 5 min without keyboard and mouse, or the computer sleeping.
+; A break is break_idle_minutes without keyboard and mouse, or the computer sleeping.
 work_breaks = {work_breaks}
 ; Minutes of continuous work before the reminder (15–480); then every 30 min
 work_break_minutes = {work_break_minutes}
+; Minutes without keyboard and mouse that count as a break (2–60): after it
+; both reminders start counting again
+break_idle_minutes = {break_idle_minutes}
 """,
 }
 
@@ -149,6 +155,7 @@ class Config:
     eye_break_popup_seconds: int = 5
     work_breaks: bool = True
     work_break_minutes: int = 120
+    break_idle_minutes: int = 5
     # Секція [plugins]: id дії плагіна -> комбінація (перевизначає ту, що задав плагін)
     plugin_hotkeys: dict = field(default_factory=dict)
 
@@ -174,7 +181,8 @@ class Config:
             except ValueError:
                 pass
         for key, lo, hi in (("copy_timeout_ms", 50, 5000), ("eye_break_minutes", 1, 240),
-                            ("eye_break_popup_seconds", 0, 120), ("work_break_minutes", 15, 480)):
+                            ("eye_break_popup_seconds", 0, 120), ("work_break_minutes", 15, 480),
+                            ("break_idle_minutes", 2, 60)):
             try:
                 setattr(cfg, key, max(lo, min(hi, cp.getint("general", key, fallback=getattr(cfg, key)))))
             except ValueError:

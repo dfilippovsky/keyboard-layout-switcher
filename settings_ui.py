@@ -81,6 +81,7 @@ def run(app):
     eye_popup_var = tk.StringVar(value=str(cfg.eye_break_popup_seconds))
     work_var = tk.BooleanVar(value=cfg.work_breaks)
     work_minutes_var = tk.StringVar(value=str(cfg.work_break_minutes))
+    idle_minutes_var = tk.StringVar(value=str(cfg.break_idle_minutes))
     languages = [("auto", tr("ui.language_auto"))] + list(_LANGUAGE_NAMES.items())
     language_var = tk.StringVar(value=dict(languages).get(cfg.language, languages[0][1]))
 
@@ -159,10 +160,16 @@ def run(app):
     ttk.Spinbox(work, from_=15, to=480, increment=15, width=5,
                 textvariable=work_minutes_var).pack(side="left", padx=4)
     ttk.Label(work, text=tr("ui.work_unit")).pack(side="left")
+    idle = ttk.Frame(frm)
+    idle.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0), padx=(20, 0))
+    ttk.Label(idle, text=tr("ui.idle")).pack(side="left")
+    ttk.Spinbox(idle, from_=2, to=60, increment=1, width=5,
+                textvariable=idle_minutes_var).pack(side="left", padx=4)
+    ttk.Label(idle, text=tr("ui.idle_unit")).pack(side="left")
     ttk.Label(frm, text=tr("ui.work_hint"),
-              foreground="gray").grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+              foreground="gray").grid(row=row + 2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
-    row += 2
+    row += 3
     names = ", ".join(layouts.name(h) for h in layouts.installed())
     ttk.Label(frm, text=tr("ui.layouts") + names,
               foreground="gray").grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
@@ -173,6 +180,7 @@ def run(app):
             eye_minutes = max(1, min(240, int(eye_minutes_var.get())))
             eye_popup = max(0, min(120, int(eye_popup_var.get())))
             work_minutes = max(15, min(480, int(work_minutes_var.get())))
+            idle_minutes = max(2, min(60, int(idle_minutes_var.get())))
         except ValueError:
             messagebox.showerror(tr("ui.error"), tr("ui.not_numbers"), parent=root)
             return
@@ -193,7 +201,7 @@ def run(app):
                       autocorrect_exclude=", ".join(n.strip() for n in exclude_var.get().split(",") if n.strip()),
                       eye_breaks=eyes_var.get(), eye_break_minutes=eye_minutes,
                       eye_break_popup_seconds=eye_popup, work_breaks=work_var.get(),
-                      work_break_minutes=work_minutes)
+                      work_break_minutes=work_minutes, break_idle_minutes=idle_minutes)
         error = app.apply_settings(values, autostart_var.get())
         if error:
             messagebox.showerror(tr("ui.error"), error, parent=root)
